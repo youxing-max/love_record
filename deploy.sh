@@ -273,17 +273,45 @@ start_server() {
 
     print_success "准备启动服务器..."
     print_info "服务器将在 http://localhost:9998 启动"
-    print_info "按 Ctrl+C 可以停止服务器"
+    echo ""
+
+    # 询问用户选择运行模式
+    print_info "请选择运行模式："
+    echo "  [1] 前台运行（按 Ctrl+C 可停止服务器）"
+    echo "  [2] 后台运行（通过 nohup 运行，日志输出到文件）"
+    echo ""
+    read -p "请输入选项 [1/2]: " -n 1 -r
+    echo ""
     echo ""
 
     # 进入 build 目录
     cd backend/build
 
-    print_info "启动中..."
-    echo ""
+    if [[ $REPLY == "2" ]]; then
+        # 后台运行
+        print_info "后台启动中..."
+        nohup ./lovedb > nohup.out 2>&1 &
+        local pid=$!
 
-    # 启动服务器
-    ./lovedb
+        sleep 2
+
+        if ps -p $pid > /dev/null; then
+            print_success "服务器已在后台启动（PID: $pid）"
+            print_info "日志文件位置: $(pwd)/nohup.out"
+            print_info "查看实时日志: tail -f $(pwd)/nohup.out"
+            print_info "停止服务器: kill $pid"
+        else
+            print_error "服务器启动失败，请查看日志文件："
+            print_info "  $(pwd)/nohup.out"
+            exit 1
+        fi
+    else
+        # 前台运行
+        print_info "前台启动中..."
+        print_info "按 Ctrl+C 可以停止服务器"
+        echo ""
+        ./lovedb
+    fi
 }
 
 # 主函数
