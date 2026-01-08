@@ -1,0 +1,18 @@
+{
+  "couple_names": {
+    "person1": "XXX",
+    "person2": "YYY"
+  },
+  "love_start_date": "2025-01-01",
+  "users": [
+    {
+      "username": "XXX",
+      "password": "XXX"
+    },
+    {
+      "username": "YYY",
+      "password": "YYY"
+    }
+  ],
+  "title": "XXX❤️YYY - 恋爱时光记录系统"
+}
