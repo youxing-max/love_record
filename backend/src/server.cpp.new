@@ -1,0 +1,89 @@
+// 返回照片列表
+std::string Server::handleGetPhotosRequest() {
+    // 扫描images目录，返回所有照片
+    std::string imagesDir = "/home/youxing/love_record/frontend/images";
+    std::string response = "HTTP/1.1 200 OK\r\n";
+    response += "Content-Type: application/json; charset=UTF-8\r\n";
+    response += "Access-Control-Allow-Origin: *\r\n";
+    response += "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+    response += "Access-Control-Allow-Headers: Content-Type, Authorization\r\n";
+    response += "Connection: keep-alive\r\n";
+    response += "\r\n";
+    response += "{\"success\": true,\"message\": \"获取照片列表成功\",\"data\": {\"photos\": [";
+
+    // 遍历images目录，获取所有图片文件
+    try {
+        // 存储图片文件和它们的最后修改时间
+        std::vector<std::pair<std::filesystem::path, std::filesystem::file_time_type>> imageFiles;
+        
+        // 首先收集所有图片文件
+        for (const auto& entry : std::filesystem::directory_iterator(imagesDir)) {
+            if (entry.is_regular_file()) {
+                std::string fileName = entry.path().filename().string();
+                // 只处理图片文件
+                std::string ext = fileName.substr(fileName.find_last_of(".") + 1);
+                for (char& c : ext) {
+                    c = tolower(c);
+                }
+                if (ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "gif") {
+                    // 获取文件的最后修改时间
+                    auto lastWriteTime = std::filesystem::last_write_time(entry.path());
+                    imageFiles.emplace_back(entry.path(), lastWriteTime);
+                }
+            }
+        }
+        
+        // 按最后修改时间倒序排序，最近修改的文件排在前面
+        std::sort(imageFiles.begin(), imageFiles.end(), [](const auto& a, const auto& b) {
+            return a.second > b.second;
+        });
+        
+        bool first = true;
+        for (const auto& [filePath, lastWriteTime] : imageFiles) {
+            std::string fileName = filePath.filename().string();
+            if (!first) {
+                response += ",";
+            }
+            
+            // 获取文件的最后修改时间，格式化为YYYY-MM-DD
+            std::string uploadDate = "2025-12-14";
+            try {
+                // 将file_time_type转换为time_t
+                auto tp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+                    lastWriteTime - std::filesystem::file_time_type::clock::now() + std::chrono::system_clock::now());
+                auto now_c = std::chrono::system_clock::to_time_t(tp);
+                std::tm* ptm = std::localtime(&now_c);
+                char dateStr[20];
+                std::strftime(dateStr, sizeof(dateStr), "%Y-%m-%d", ptm);
+                uploadDate = std::string(dateStr);
+            } catch (...) {
+                // 如果获取时间失败，使用当前日期作为默认值
+                auto now = std::chrono::system_clock::now();
+                auto now_c = std::chrono::system_clock::to_time_t(now);
+                std::tm* ptm = std::localtime(&now_c);
+                char dateStr[20];
+                std::strftime(dateStr, sizeof(dateStr), "%Y-%m-%d", ptm);
+                uploadDate = std::string(dateStr);
+            }
+            
+            // 使用文件的inode号和大小生成唯一ID，避免哈希冲突
+            auto fileSize = std::filesystem::file_size(filePath);
+            auto inode = std::filesystem::file_status(filePath).inode();
+            long long photoId = (static_cast<long long>(inode) << 32) | static_cast<long long>(fileSize);
+            
+            response += "{\"id\": " + std::to_string(photoId) + ",";
+            response += "\"url\": \"/images/" + fileName + "\",";
+            response += "\"name\": \"" + fileName + "\",";
+            response += "\"category\": \"日常\",";
+            response += "\"uploadDate\": \"" + uploadDate + "\"}";
+            first = false;
+        }
+    } catch (const std::filesystem::filesystem_error& e) {
+        std::cerr << "❌ 无法读取images目录: " << e.what() << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "❌ 处理照片列表时发生异常: " << e.what() << std::endl;
+    }
+
+    response += "]}}";
+    return response;
+}

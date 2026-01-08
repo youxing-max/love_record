@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XXXXX❤️XXXXX - 恋爱时光记录系统</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💕</text></svg>">
+</head>
+<body>
+    <!-- 动态背景效果 -->
+    <div class="bg-animation">
+        <div class="hearts"></div>
+        <div class="stars"></div>
+        <div class="love-quotes">
+            <div class="love-quote">爱你到永远 💖</div>
+            <div class="love-quote">有你真好 💕</div>
+            <div class="love-quote">幸福就是和你在一起 😊</div>
+            <div class="love-quote">每一天都爱你多一点 💝</div>
+            <div class="love-quote">你是我的唯一 ❤️</div>
+            <div class="love-quote">永远在一起 🔒</div>
+            <div class="love-quote">我们的故事还在继续 ✨</div>
+            <div class="love-quote">你是我最美好的遇见 💜</div>
+            <div class="love-quote">每一刻都值得珍惜 💗</div>
+            <div class="love-quote">爱你无期限 🔒</div>
+        </div>
+    </div>
+
+    <!-- 登录界面 -->
+    <div id="loginSection" class="login-section">
+        <!-- 漂浮物容器 -->
+        <div id="floatingParticles"></div>
+        <div class="login-container">
+            <div class="login-header">
+                <h1 class="logo-text">XXXXX❤️XXXXX</h1>
+                <p class="subtitle">记录我们的美好时光</p>
+            </div>
+
+            <form id="loginForm" class="login-form">
+                <div class="form-group">
+                    <label for="username">💝 用户名</label>
+                    <input type="text" id="username" placeholder="请输入用户名" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="password">🔐 密码</label>
+                    <input type="password" id="password" placeholder="请输入密码" required>
+                </div>
+
+                <button type="button" class="login-btn" onclick="handleLogin()">
+                    <span class="btn-text">登录</span>
+                    <span class="btn-heart">💕</span>
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 主界面 -->
+    <div id="mainSection" class="main-section" style="display: none;">
+        <!-- 顶部导航栏 -->
+        <nav class="navbar">
+            <div class="nav-container">
+                <div class="nav-brand">
+                    <h1>XXXXX❤️XXXXX</h1>
+                </div>
+
+                <div class="nav-menu">
+                    <a href="#" class="nav-item active" onclick="showPage('home')">
+                        <span class="nav-icon">🏠</span>
+                        <span class="nav-text">首页</span>
+                    </a>
+                    <a href="#" class="nav-item" onclick="showPage('photos')">
+                        <span class="nav-icon">📸</span>
+                        <span class="nav-text">照片墙</span>
+                    </a>
+                    <a href="#" class="nav-item" onclick="showPage('anniversary')">
+                        <span class="nav-icon">📅</span>
+                        <span class="nav-text">纪念日</span>
+                    </a>
+                    <a href="#" class="nav-item" onclick="showPage('diary')">
+                        <span class="nav-icon">📝</span>
+                        <span class="nav-text">日记</span>
+                    </a>
+                    <a href="#" class="nav-item" onclick="showPage('wishes')">
+                        <span class="nav-icon">✨</span>
+                        <span class="nav-text">愿望</span>
+                    </a>
+                    <a href="#" class="nav-item" onclick="showPage('stats')">
+                        <span class="nav-icon">📊</span>
+                        <span class="nav-text">统计</span>
+                    </a>
+                </div>
+
+                <div class="nav-user">
+                    <span class="user-info" id="userInfo">欢迎</span>
+                    <button class="logout-btn" onclick="handleLogout()">退出</button>
+                </div>
+            </div>
+        </nav>
+
+        <!-- 页面内容区域 -->
+        <div class="page-content">
+            <!-- 首页 -->
+            <div id="homePage" class="page">
+                <div class="love-days-card">
+                    <!-- 卡片内漂浮的爱情话语 (将由JavaScript动态生成99个) -->
+                    <div class="card-quotes" id="cardQuotes">
+                    </div>
+                    
+                    <h2>💕 我们在一起</h2>
+                    <div class="start-date">开始于: <span id="startDate">2025-01-01</span></div>
+                    <div class="love-counter">
+                        <div class="love-time">
+                            <span class="days" id="loveDays">0</span>
+                            <span class="days-text">天</span>
+                            <span class="hours" id="loveHours">00</span>
+                            <span class="hours-text">时</span>
+                            <span class="minutes" id="loveMinutes">00</span>
+                            <span class="minutes-text">分</span>
+                        </div>
+                        <div class="love-seconds">
+                            <span class="seconds" id="loveSeconds">00</span>
+                            <span class="seconds-text">秒</span>
+                        </div>
+                    </div>
+                    <p class="love-message animated-text" id="loveMessage">
+                        <span class="text-heart left-heart">❤️</span>
+                        我们已经在一起<span id="totalTime">0天0时0分0秒</span>啦！
+                        <span class="text-heart right-heart">❤️</span>
+                    </p>
+                </div>
+
+                <div class="quick-stats">
+                    <div class="stat-card">
+                        <div class="stat-icon">📸</div>
+                        <div class="stat-number" id="photoCount">0</div>
+                        <div class="stat-label">张照片</div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon">📝</div>
+                        <div class="stat-number" id="diaryCount">0</div>
+                        <div class="stat-label">篇日记</div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon">🎉</div>
+                        <div class="stat-number" id="anniversaryCount">0</div>
+                        <div class="stat-label">个纪念日</div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon">✨</div>
+                        <div class="stat-number" id="wishCount">0</div>
+                        <div class="stat-label">个愿望</div>
+                    </div>
+                </div>
+
+                <div class="recent-activities">
+                    <h3>🌟 最近活动</h3>
+                    <div class="activity-list" id="activityList">
+                        <p class="no-activity">还没有活动记录...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 照片墙页面 -->
+            <div id="photosPage" class="page">
+                <div class="page-header">
+                <h2>📸 照片墙</h2>
+                <div class="upload-section">
+                <label for="photoUpload" class="upload-btn">
+                    <span>📤 上传照片</span>
+                    <input type="file" id="photoUpload" accept="image/*" multiple onchange="handlePhotoUpload(event)">
+                </label>
+            </div>
+            </div>
+
+                <div class="photo-grid" id="photoWall">
+                    <!-- 静态测试图片 -->
+                    <div class="photo-item">
+                        <img src="/frontend/images/bg.jpg" alt="测试图片" style="display: block; width: 100%; height: auto;">
+                        <div class="photo-info">
+                            <h3>测试图片</h3>
+                            <p>测试 - 2025-12-16</p>
+                        </div>
+                    </div>
+                    <!-- 照片将动态加载到这里 -->
+                </div>
+            </div>
+
+            <!-- 纪念日页面 -->
+            <div id="anniversaryPage" class="page" style="display: none;">
+                <div class="page-header">
+                    <h2>📅 纪念日管理</h2>
+                    <button class="add-btn" onclick="showAnniversaryForm()">
+                        <span>➕ 添加纪念日</span>
+                    </button>
+                </div>
+
+                <div class="anniversary-form" id="anniversaryForm" style="display: none;">
+                    <div class="form-group">
+                        <label>纪念日名称</label>
+                        <input type="text" id="anniversaryTitle" placeholder="例如：第一次约会">
+                    </div>
+                    <div class="form-group">
+                        <label>日期</label>
+                        <input type="date" id="anniversaryDate">
+                    </div>
+                    <div class="form-group">
+                        <label>分类</label>
+                        <select id="anniversaryCategory">
+                            <option value="恋爱">恋爱纪念日</option>
+                            <option value="生日">生日</option>
+                            <option value="节日">节日</option>
+                            <option value="自定义">自定义</option>
+                        </select>
+                    </div>
+                    <div class="form-actions">
+                        <button class="save-btn" onclick="saveAnniversary()">保存</button>
+                        <button class="cancel-btn" onclick="hideAnniversaryForm()">取消</button>
+                    </div>
+                </div>
+
+                <div class="anniversary-list" id="anniversaryList">
+                    <!-- 纪念日列表将动态加载 -->
+                </div>
+            </div>
+
+            <!-- 日记页面 -->
+            <div id="diaryPage" class="page" style="display: none;">
+                <div class="page-header">
+                    <h2>📝 恋爱日记</h2>
+                    <button class="add-btn" onclick="showDiaryForm()">
+                        <span>➕ 写日记</span>
+                    </button>
+                </div>
+
+                <div class="diary-form" id="diaryForm" style="display: none;">
+                    <div class="form-group">
+                        <label>日记标题</label>
+                        <input type="text" id="diaryTitle" placeholder="今天的心情...">
+                    </div>
+                    <div class="form-group">
+                        <label>心情评分</label>
+                        <div class="mood-selector">
+                            <button class="mood-btn" data-mood="1" onclick="selectMood(1)">😢</button>
+                            <button class="mood-btn" data-mood="2" onclick="selectMood(2)">😔</button>
+                            <button class="mood-btn selected" data-mood="3" onclick="selectMood(3)">😊</button>
+                            <button class="mood-btn" data-mood="4" onclick="selectMood(4)">😍</button>
+                            <button class="mood-btn" data-mood="5" onclick="selectMood(5)">🥰</button>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>日记内容</label>
+                        <textarea id="diaryContent" rows="10" placeholder="记录今天的美好时光..."></textarea>
+                    </div>
+                    <div class="form-actions">
+                        <button class="save-btn" onclick="saveDiary()">保存</button>
+                        <button class="cancel-btn" onclick="hideDiaryForm()">取消</button>
+                    </div>
+                </div>
+
+                <div class="diary-list" id="diaryList">
+                    <!-- 日记列表将动态加载 -->
+                </div>
+            </div>
+
+            <!-- 愿望页面 -->
+            <div id="wishesPage" class="page" style="display: none;">
+                <div class="page-header">
+                    <h2>✨ 愿望清单</h2>
+                    <button class="add-btn" onclick="showWishForm()">
+                        <span>➕ 添加愿望</span>
+                    </button>
+                </div>
+
+                <div class="wish-form" id="wishForm" style="display: none;">
+                    <div class="form-group">
+                        <label>愿望标题</label>
+                        <input type="text" id="wishTitle" placeholder="例如：一起去看极光">
+                    </div>
+                    <div class="form-group">
+                        <label>愿望描述</label>
+                        <textarea id="wishDescription" rows="3" placeholder="详细描述这个愿望..."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>分类</label>
+                        <select id="wishCategory">
+                            <option value="旅行">旅行</option>
+                            <option value="生活">生活</option>
+                            <option value="节日">节日</option>
+                            <option value="其他">其他</option>
+                        </select>
+                    </div>
+                    <div class="form-actions">
+                        <button class="save-btn" onclick="saveWish()">保存</button>
+                        <button class="cancel-btn" onclick="hideWishForm()">取消</button>
+                    </div>
+                </div>
+
+                <div class="wish-list" id="wishList">
+                    <!-- 愿望列表将动态加载 -->
+                </div>
+            </div>
+
+            <!-- 统计页面 -->
+            <div id="statsPage" class="page" style="display: none;">
+                <div class="page-header">
+                    <h2>📊 爱情数据统计</h2>
+                </div>
+
+                <div class="stats-container">
+                    <div class="stats-card">
+                        <h3>💕 恋爱时长统计</h3>
+                        <div class="time-stats">
+                            <div class="time-item">
+                                <div class="time-value" id="years">0</div>
+                                <div class="time-label">年</div>
+                            </div>
+                            <div class="time-item">
+                                <div class="time-value" id="months">0</div>
+                                <div class="time-label">月</div>
+                            </div>
+                            <div class="time-item">
+                                <div class="time-value" id="days">0</div>
+                                <div class="time-label">天</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="stats-card">
+                        <h3>📸 照片统计</h3>
+                        <div class="chart-container">
+                            <div class="photo-chart">
+                                <div class="chart-item" style="background: linear-gradient(135deg, #f093fb, #f5576c);">
+                                    <div class="chart-value" id="dailyPhotoCount">0</div>
+                                    <div class="chart-label">日常照</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="stats-card">
+                        <h3>📝 日记统计</h3>
+                        <div class="chart-container">
+                            <div class="photo-chart">
+                                <div class="chart-item" style="background: linear-gradient(135deg, #4facfe, #00f2fe);">
+                                    <div class="chart-value" id="diariesCount">0</div>
+                                    <div class="chart-label">日记总数</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="stats-card">
+                        <h3>🎉 纪念日统计</h3>
+                        <div class="chart-container">
+                            <div class="photo-chart">
+                                <div class="chart-item" style="background: linear-gradient(135deg, #fa709a, #fee140);">
+                                    <div class="chart-value" id="anniversariesCount">0</div>
+                                    <div class="chart-label">纪念日总数</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="stats-card">
+                        <h3>✨ 愿望统计</h3>
+                        <div class="chart-container">
+                            <div class="photo-chart">
+                                <div class="chart-item" style="background: linear-gradient(135deg, #30cfd0, #330867);">
+                                    <div class="chart-value" id="wishesCount">0</div>
+                                    <div class="chart-label">愿望总数</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="stats-card">
+                        <h3>😊 心情趋势</h3>
+                        <div class="mood-stats">
+                            <div class="mood-trend">
+                                <span class="mood-emoji">😊</span>
+                                <div class="mood-bar">
+                                    <div class="mood-progress" style="width: 0%;"></div>
+                                </div>
+                                <span class="mood-percentage">0%</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/app.js?version=20251216_fixed"></script>
+    <script>
+        // 页面加载完成后，动态添加一张测试图片
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🎯 页面加载完成，开始动态添加测试图片');
+            
+            // 获取照片墙容器
+            const photoWall = document.getElementById('photoWall');
+            if (!photoWall) {
+                console.error('❌ 无法找到照片墙容器');
+                return;
+            }
+            
+            // 创建测试图片元素
+            const testPhoto = {
+                id: 999,
+                name: '动态测试图片',
+                url: '/frontend/images/bg.jpg',
+                category: '测试',
+                uploadDate: new Date().toISOString()
+            };
+            
+            // 创建照片元素
+            const photoElement = document.createElement('div');
+            photoElement.className = 'photo-item';
+            
+            // 设置照片元素的HTML
+            photoElement.innerHTML = `
+                <div style="width: 100%; height: 200px; overflow: hidden; background-color: #f0f0f0; display: flex; align-items: center; justify-content: center;">
+                    <img src="${testPhoto.url}" alt="${testPhoto.name}" style="display: block; max-width: 100%; max-height: 100%; object-fit: contain;">
+                </div>
+                <div class="photo-info">
+                    <h3>${testPhoto.name}</h3>
+                    <p>${testPhoto.category} - ${testPhoto.uploadDate}</p>
+                </div>
+                <div class="photo-actions">
+                    <button class="photo-delete" onclick="deletePhoto(${testPhoto.id})" title="删除照片">
+                        🗑️
+                    </button>
+                </div>
+            `;
+            
+            // 将照片元素添加到照片墙容器
+            photoWall.appendChild(photoElement);
+            console.log('✅ 动态测试图片已添加');
+        });
+    </script>
+</body>
+</html>

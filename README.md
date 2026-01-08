@@ -5,13 +5,73 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![C++17](https://img.shields.io/badge/C++-17-blue.svg)](https://isocpp.org/)
 [![CMake](https://img.shields.io/badge/CMake-3.10+-green.svg)](https://cmake.org/)
-[![GitHub](https://img.shields.io/badge/GitHub-youxing--max-blue.svg)](https://github.com/youxing-max/love_time_record_system)
+[![GitHub](https://img.shields.io/badge/GitHub-youxing--max-blue.svg)](https://github.com/youxing-max/love_record)
 
 ---
 
 ## 🌟 项目简介
 
 LOVE_TIME_RECORD 是一个为情侣量身定制的恋爱记录系统，帮助您记录和珍藏两个人的美好时光。通过精美的界面设计和丰富的功能模块，让每一个珍贵的瞬间都能被完美保存。
+
+### 快速上手运行（本项目只适合linux系统，目前未实现安装模式，只支持下载运行）
+
+#### 1·一键部署
+
+```bash
+# 克隆项目
+git clone https://github.com/youxing-max/love_record.git
+cd love_record
+
+# 赋予脚本执行权限
+chmod +x deploy.sh
+
+# 运行部署脚本
+./deploy.sh
+```
+
+#### 2·手动部署
+
+```bash
+# 克隆项目
+git clone https://github.com/youxing-max/love_record.git
+cd love_record
+
+# 赋予脚本执行权限
+chmod +x build.sh configure.sh
+
+# 进行情侣双方名字 账号密码 恋爱起始日等配置
+
+./configure.sh
+
+# 构建项目
+./build.sh
+
+#到指定项目目录
+cd build
+# 启动服务器
+
+## 1·前台启动
+./lovedb
+## 2·前台启动 日志模式(后台服务器日志自动在build目录下的server.log文件)
+./lovedb -file 
+## 3·后台启动 使用nohup模式
+### 日志默认在build目录的nohup.out文件
+nohup ./lovedb  &
+### 日志默认在build目录的server.log文件
+nohup ./lovedb -file &
+
+# 停止服务器
+
+ ## 查找进程ID
+ pid=$(ps -ef | grep lovedb | grep -v grep | awk '{print $2}')
+ ## 终止进程
+ kill -9 $pid
+
+
+# ps:可以更改frontend目录下的pg.jpg文件来修改前端登录界面，否则使用默认！！！
+```
+
+
 
 ### ✨ 核心亮点
 
@@ -50,7 +110,7 @@ LOVE_TIME_RECORD 是一个为情侣量身定制的恋爱记录系统，帮助您
 ## 📁 项目结构
 
 ```
-love_time_record_system/
+love_record/
 ├── backend/                    # C++ 后端服务
 │   ├── include/                # 头文件
 │   │   ├── server.h           # HTTP 服务器头文件
@@ -108,8 +168,8 @@ love_time_record_system/
 #### 第一步：克隆项目
 
 ```bash
-git clone https://github.com/youxing-max/love_time_record_system.git
-cd love_time_record_system
+git clone https://github.com/youxing-max/love_record.git
+cd love_record
 ```
 
 ---
@@ -192,8 +252,8 @@ cd backend/build
 
 启动成功后，您会看到如下日志：
 ```
-🔍 可执行文件路径: /your/path/love_time_record_system/backend/build/lovedb
-✅ 项目根目录: /your/path/love_time_record_system
+🔍 可执行文件路径: /your/path/love_record/backend/build/lovedb
+✅ 项目根目录: /your/path/love_record
 🌸 LoveRecord Server Starting...
 📡 Server running on http://localhost:9998
 💝 Database connected successfully!
@@ -409,8 +469,8 @@ bool Server::initialize(int port, const std::string& dbPath) {
 
 1. **Fork 项目**
    ```bash
-   git clone https://github.com/youxing-max/love_time_record_system.git
-   cd love_time_record_system
+   git clone https://github.com/youxing-max/love_record.git
+   cd love_record
    ```
 
 2. **创建特性分支**
@@ -454,7 +514,7 @@ bool Server::initialize(int port, const std::string& dbPath) {
 
 ## 📞 技术支持
 
-- **问题反馈**: 请提交 [GitHub Issues](https://github.com/youxing-max/love_time_record_system/issues)
+- **问题反馈**: 请提交 [GitHub Issues](https://github.com/youxing-max/love_record/issues)
 - **功能建议**: 欢迎在 Issues 中提出
 - **技术讨论**: 欢迎参与 Discussions
 
@@ -482,6 +542,6 @@ bool Server::initialize(int port, const std::string& dbPath) {
 
 Made with ❤️ by [youxing-max](https://github.com/youxing-max)
 
-[⭐ Star](https://github.com/youxing-max/love_time_record_system) · [🐛 Report Bug](https://github.com/youxing-max/love_time_record_system/issues) · [✨ Request Feature](https://github.com/youxing-max/love_time_record_system/issues)
+[⭐ Star](https://github.com/youxing-max/love_record) · [🐛 Report Bug](https://github.com/youxing-max/love_record/issues) · [✨ Request Feature](https://github.com/youxing-max/love_record/issues)
 
 </div>

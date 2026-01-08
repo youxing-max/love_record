@@ -1,0 +1,3636 @@
+#include "server.h"
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <vector>
+#include <map>
+#include <filesystem>
+#include <fstream>
+#include <chrono>
+#include <ctime>
+#include <thread>
+#include <cstring>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
+// 完整的ServerImpl类定义
+class Server::ServerImpl {
+public:
+    ServerImpl() : port(9998), running(false) {}
+    int port;
+    bool running;
+};
+
+// 构造函数
+Server::Server() : pImpl(std::make_unique<ServerImpl>()) {}
+
+// 析构函数
+Server::~Server() {
+    stop();
+}
+
+// 初始化服务器
+bool Server::initialize(int port, const std::string& dbPath) {
+    pImpl->port = port;
+    std::cout << "✅ 服务器初始化成功!" << std::endl;
+    return true;
+}
+
+// 启动服务器
+void Server::start() {
+    pImpl->running = true;
+    std::cout << "🌸 LoveRecord Server Starting..." << std::endl;
+    std::cout << "📡 Server running on http://localhost:" << pImpl->port << std::endl;
+    std::cout << "💝 Database connected successfully!" << std::endl;
+    
+    // 从文件加载纪念日数据 - 使用修复后的安全版本
+    safeLoadAnniversariesFromFile();
+    
+    // 从文件加载活动数据 - 使用安全版本
+    safeLoadActivitiesFromFile();
+    
+    // 从文件加载愿望数据
+    safeLoadWishesFromFile();
+    
+    // 从文件加载日记数据
+    safeLoadDiariesFromFile();
+    
+    std::cout << "🎯 HTTP Server started on port " << pImpl->port << std::endl;
+    std::cout << "🌐 Listening on all interfaces" << std::endl;
+
+    // 启动简单的HTTP服务器模拟
+    std::thread serverThread([this]() {
+        runSimpleServer();
+    });
+    serverThread.detach();
+}
+
+// 停止服务器
+void Server::stop() {
+    pImpl->running = false;
+    std::cout << "⏹️  服务器已停止" << std::endl;
+}
+
+// 检查服务器是否正在运行
+bool Server::isRunning() const {
+    return pImpl->running;
+}
+
+// 处理GET请求
+std::string Server::handleGetRequest(const std::string& path) {
+    std::cout << "📨 收到请求: GET " << path << " HTTP/1.1" << std::endl;
+    
+    // 提取路径部分，去掉查询参数
+    std::string pathOnly = path;
+    size_t queryPos = path.find("?");
+    if (queryPos != std::string::npos) {
+        pathOnly = path.substr(0, queryPos);
+        std::cout << "🔍 提取路径部分: " << pathOnly << std::endl;
+    }
+
+    if (pathOnly == "/api/photos") {
+        return handleGetPhotosRequest();
+    } else if (pathOnly == "/api/anniversaries") {
+        return handleGetAnniversariesRequest();
+    } else if (pathOnly == "/api/diaries") {
+        return handleGetDiariesRequest();
+    } else if (pathOnly == "/api/wishes") {
+        return handleGetWishesRequest();
+    } else if (pathOnly == "/api/activities") {
+        return handleGetActivitiesRequest();
+    } else if (pathOnly == "/api/stats") {
+        return handleGetStatsRequest();
+    } else {
+            // 处理静态文件请求
+            std::string filePath;
+            if (pathOnly == "/") {
+                // 根路径请求返回index.html
+                filePath = "/home/youxing/love_record/frontend/index.html";
+            } else if (pathOnly.find("/frontend/") == 0) {
+                // 如果路径以/frontend/开头，直接映射到frontend目录
+                // 例如：/frontend/images/bg.jpg -> /home/youxing/love_record/frontend/images/bg.jpg
+                filePath = "/home/youxing/love_record" + pathOnly;
+            } else {
+                // 其他路径直接映射到static文件
+                if (pathOnly.find("/frontend/") == 0) { filePath = "/home/youxing/love_record" + pathOnly; } else { filePath = "/home/youxing/love_record/frontend" + pathOnly; }
+            }
+            return serveStaticFile(filePath);
+        }
+}
+
+// 处理POST请求
+std::string Server::handlePostRequest(const std::string& path, const std::string& body) {
+    std::cout << "📨 收到请求: POST " << path << " HTTP/1.1" << std::endl;
+
+    // 提取路径部分，去掉查询参数
+    std::string pathOnly = path;
+    size_t queryPos = path.find("?");
+    if (queryPos != std::string::npos) {
+        pathOnly = path.substr(0, queryPos);
+    }
+
+    if (pathOnly == "/api/photos") {
+        return handlePostPhotosRequest(body);
+    } else if (pathOnly == "/api/photos/delete") {
+        return handleDeletePhotosRequest(body);
+    } else if (pathOnly == "/api/anniversaries") {
+        return handlePostAnniversariesRequest(body);
+    } else if (pathOnly == "/api/anniversaries/delete") {
+        return handleDeleteAnniversariesRequest(body);
+    } else if (pathOnly == "/api/diaries") {
+        return handlePostDiariesRequest(body);
+    } else if (pathOnly == "/api/diaries/delete") {
+        return handleDeleteDiariesRequest(body);
+    } else if (pathOnly == "/api/wishes") {
+        return handlePostWishesRequest(body);
+    } else if (pathOnly == "/api/wishes/delete") {
+        return handleDeleteWishesRequest(body);
+    } else if (pathOnly == "/api/wishes/complete") {
+        return handleCompleteWishRequest(body);
+    } else if (pathOnly == "/api/activities") {
+        return handlePostActivitiesRequest(body);
+    } else {
+        std::string response = "HTTP/1.1 404 Not Found\r\n";
+        response += "Content-Type: application/json; charset=UTF-8\r\n";
+        response += "Access-Control-Allow-Origin: *\r\n";
+        response += "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+        response += "Access-Control-Allow-Headers: Content-Type, Authorization\r\n";
+        response += "Connection: close\r\n";
+        response += "\r\n";
+        response += "{\"success\": false,\"message\": \"路径不存在\"}";
+        return response;
+    }
+}
+
+// 处理OPTIONS请求
+std::string Server::handleOptionsRequest(const std::string& path) {
+    std::string response = "HTTP/1.1 204 No Content\r\n";
+    response += "Access-Control-Allow-Origin: *\r\n";
+    response += "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+    response += "Access-Control-Allow-Headers: Content-Type, Authorization\r\n";
+    response += "Connection: keep-alive\r\n";
+    response += "\r\n";
+    return response;
+}
+
+// 加载照片列表
+
+// 处理添加照片请求
+std::string Server::handlePostPhotosRequest(const std::string& body) {
+    // 返回成功响应，不实际添加照片
+    std::string response = "HTTP/1.1 200 OK\r\n";
+    response += "Content-Type: application/json; charset=UTF-8\r\n";
+    response += "Access-Control-Allow-Origin: *\r\n";
+    response += "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+    response += "Access-Control-Allow-Headers: Content-Type, Authorization\r\n";
+    response += "Connection: keep-alive\r\n";
+    response += "\r\n";
+    response += "{\"success\": true,\"message\": \"照片添加成功\",\"data\": {\"photoId\": 1}}";
+    return response;
+}
+
+// 处理文件上传
+std::string Server::handlePhotoUploadRequest(const std::string& body, const std::string& filePath) {
+    // 确保images目录存在
+    std::string imagesDir = "/home/youxing/love_record/frontend/images";
+    std::filesystem::create_directories(imagesDir);
+    
+    std::string response = "HTTP/1.1 200 OK\r\n";
+    response += "Content-Type: application/json; charset=UTF-8\r\n";
+    response += "Access-Control-Allow-Origin: *\r\n";
+    response += "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+    response += "Access-Control-Allow-Headers: Content-Type, Authorization\r\n";
+    response += "Connection: keep-alive\r\n";
+    response += "\r\n";
+    
+    // 直接将请求体写入文件，保存用户上传的实际文件内容
+    std::ofstream outFile(filePath, std::ios::binary);
+    if (outFile.is_open()) {
+        // 写入请求体，这是用户上传的实际文件内容
+        outFile.write(body.c_str(), body.size());
+        outFile.close();
+        
+        // 验证文件大小
+        size_t fileSize = std::filesystem::file_size(filePath);
+        
+        // 生成成功响应
+            std::string photoUrl = "/frontend/images/" + std::filesystem::path(filePath).filename().string();
+            response += "{\"success\": true,\"message\": \"照片上传成功\",\"data\": {\"photoId\": " + std::to_string(std::time(nullptr)) + ",\"url\": \"" + photoUrl + "\"}}";
+        std::cout << "📸 照片上传成功，保存路径: " << filePath << "，URL: " << photoUrl << "，文件大小: " << fileSize << "字节" << std::endl;
+    } else {
+        response += "{\"success\": false,\"message\": \"无法创建文件\"}";
+        std::cerr << "❌ 无法创建文件: " << filePath << std::endl;
+    }
+    
+    return response;
+}
+
+// 处理删除照片请求
+std::string Server::handleDeletePhotosRequest(const std::string& body) {
+    // 解析请求体，获取照片ID和名称
+    std::string photoIdStr = "";
+    std::string photoName = "";
+    
+    // 解析ID
+    size_t idPos = body.find("\"id\":");
+    if (idPos != std::string::npos) {
+        size_t idStart = body.find_first_of("0123456789", idPos + 5);
+        if (idStart != std::string::npos) {
+            size_t idEnd = body.find_first_not_of("0123456789", idStart);
+            photoIdStr = body.substr(idStart, idEnd - idStart);
+        }
+    }
+    
+    // 解析名称
+    size_t namePos = body.find("\"name\":");
+    if (namePos != std::string::npos) {
+        size_t nameStart = body.find("\"", namePos + 7) + 1;
+        if (nameStart != std::string::npos) {
+            size_t nameEnd = body.find("\"", nameStart);
+            photoName = body.substr(nameStart, nameEnd - nameStart);
+        }
+    }
+    
+    std::string imagesDir = "/home/youxing/love_record/frontend/images";
+    std::string fileName = "";
+    
+    std::cout << "🗑️  收到删除照片请求: ID=" << photoIdStr << ", 名称=" << photoName << std::endl;
+    
+    try {
+        if (!photoName.empty()) {
+            // 直接使用照片名称删除文件
+            fileName = photoName;
+            std::string filePath = imagesDir + "/" + fileName;
+            if (std::filesystem::exists(filePath)) {
+                if (std::filesystem::remove(filePath)) {
+                    std::cout << "🗑️  照片删除成功，文件路径: " << filePath << std::endl;
+                } else {
+                    std::cerr << "❌ 无法删除照片文件: " << filePath << std::endl;
+                }
+            } else {
+                std::cerr << "❌ 照片文件不存在: " << filePath << std::endl;
+            }
+        } else {
+            // 根据ID查找文件
+            for (const auto& entry : std::filesystem::directory_iterator(imagesDir)) {
+                if (entry.is_regular_file()) {
+                    std::string currentFileName = entry.path().filename().string();
+                    size_t currentFileId = std::hash<std::string>{}(currentFileName);
+                    if (std::to_string(currentFileId) == photoIdStr) {
+                        fileName = currentFileName;
+                        break;
+                    }
+                }
+            }
+            
+            if (!fileName.empty()) {
+                std::string filePath = imagesDir + "/" + fileName;
+                if (std::filesystem::remove(filePath)) {
+                    std::cout << "🗑️  照片删除成功，文件路径: " << filePath << std::endl;
+                } else {
+                    std::cerr << "❌ 无法删除照片文件: " << filePath << std::endl;
+                }
+            } else {
+                std::cerr << "❌ 无法找到对应的照片文件，ID=" << photoIdStr << std::endl;
+            }
+        }
+    } catch (const std::filesystem::filesystem_error& e) {
+        std::cerr << "❌ 无法操作images目录: " << e.what() << std::endl;
+    }
+    
+    // 返回成功响应
+    std::string response = "HTTP/1.1 200 OK\r\n";
+    response += "Content-Type: application/json; charset=UTF-8\r\n";
+    response += "Access-Control-Allow-Origin: *\r\n";
+    response += "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+    response += "Access-Control-Allow-Headers: Content-Type, Authorization\r\n";
+    response += "Connection: keep-alive\r\n";
+    response += "\r\n";
+    response += "{\"success\": true,\"message\": \"照片删除成功\"}";
+    return response;
+}
+
+// 纪念日结构体定义
+struct Anniversary {
+    long long id;
+    std::string title;
+    std::string date;
+    std::string category;
+    std::string createdAt;
+};
+
+// 全局纪念日列表
+std::vector<Anniversary> g_anniversaries;
+
+// 纪念日数据存储文件路径
+const std::string ANNIVERSARIES_FILE = "/home/youxing/love_record/backend/data/anniversaries.json";
+
+// 活动结构体定义
+struct Activity {
+    long long id;
+    std::string type;
+    std::string content;
+    std::string createdAt;
+    std::string operator_; // 操作者字段，使用operator_避免与C++关键字冲突
+};
+
+// 全局活动列表
+std::vector<Activity> g_activities;
+
+// 活动数据存储文件路径
+const std::string ACTIVITIES_FILE = "/home/youxing/love_record/backend/data/activities.json";
+
+// 愿望结构体定义
+struct Wish {
+    long long id;
+    std::string content;
+    std::string title;
+    std::string description;
+    std::string category;
+    bool isCompleted;
+    std::string createdAt;
+    std::string completedAt;
+};
+
+// 全局愿望列表
+std::vector<Wish> g_wishes;
+
+// 愿望数据存储文件路径
+const std::string WISHES_FILE = "/home/youxing/love_record/backend/data/wishes.json";
+
+// 日记结构体定义
+struct Diary {
+    long long id;
+    std::string title;
+    std::string content;
+    int mood;
+    std::string author;
+    std::string createdAt;
+};
+
+// 全局日记列表
+std::vector<Diary> g_diaries;
+
+// 日记数据存储文件路径
+const std::string DIARIES_FILE = "/home/youxing/love_record/backend/data/diaries.json";
+
+// 从文件安全加载活动数据
+void Server::safeLoadActivitiesFromFile() {
+    try {
+        // 创建数据存储目录
+        std::filesystem::path dirPath = std::filesystem::path(ACTIVITIES_FILE).parent_path();
+        if (!std::filesystem::exists(dirPath)) {
+            std::filesystem::create_directories(dirPath);
+            std::cout << "📁 已创建数据存储目录: " << dirPath << std::endl;
+        }
+        
+        // 检查文件是否存在
+        if (!std::filesystem::exists(ACTIVITIES_FILE)) {
+            std::cout << "📄 活动数据文件不存在，使用空列表" << std::endl;
+            return;
+        }
+        
+        // 打开文件并获取大小，避免读取过大文件
+        std::ifstream inFile(ACTIVITIES_FILE, std::ios::ate);
+        if (!inFile.is_open()) {
+            std::cerr << "❌ 无法打开活动数据文件: " << ACTIVITIES_FILE << std::endl;
+            return;
+        }
+        
+        // 获取文件大小，限制读取大小
+        std::streampos fileSize = inFile.tellg();
+        inFile.seekg(0, std::ios::beg);
+        
+        // 限制文件大小，避免内存消耗过高
+        if (fileSize > 1024 * 1024) { // 限制为1MB
+            std::cerr << "❌ 活动数据文件过大，限制读取大小" << std::endl;
+            inFile.close();
+            return;
+        }
+        
+        // 读取文件内容
+        std::string jsonContent;
+        jsonContent.resize(static_cast<size_t>(fileSize));
+        inFile.read(&jsonContent[0], fileSize);
+        inFile.close();
+        
+        // 清空全局活动列表
+        g_activities.clear();
+        
+        // 解析JSON数据 - 简化版，使用更安全的解析方式
+        if (jsonContent == "[]" || jsonContent == "") {
+            std::cout << "📄 活动数据文件为空，使用空列表" << std::endl;
+            return;
+        }
+        
+        // 简化的JSON解析
+        size_t start = jsonContent.find('[');
+        size_t end = jsonContent.rfind(']');
+        if (start == std::string::npos || end == std::string::npos || start >= end) {
+            std::cerr << "❌ 无效的活动数据文件格式" << std::endl;
+            return;
+        }
+        
+        // 提取数组内容
+        std::string arrayContent = jsonContent.substr(start + 1, end - start - 1);
+        
+        // 分割对象
+        size_t pos = 0;
+        while (pos < arrayContent.size()) {
+            // 找到对象的开始和结束位置
+            size_t objStart = arrayContent.find('{', pos);
+            if (objStart == std::string::npos) break;
+            
+            // 找到匹配的结束括号，处理嵌套结构
+            size_t objEnd = arrayContent.find('}', objStart + 1);
+            if (objEnd == std::string::npos) break;
+            
+            // 检查嵌套结构，确保找到正确的结束括号
+            int braceCount = 1;
+            size_t tempPos = objStart + 1;
+            while (tempPos < arrayContent.size() && braceCount > 0) {
+                if (arrayContent[tempPos] == '{') {
+                    braceCount++;
+                } else if (arrayContent[tempPos] == '}') {
+                    braceCount--;
+                    if (braceCount == 0) {
+                        objEnd = tempPos;
+                        break;
+                    }
+                }
+                tempPos++;
+            }
+            
+            // 如果找不到匹配的结束括号，跳过
+            if (braceCount > 0) {
+                std::cerr << "⚠️  找不到匹配的结束括号，跳过该对象" << std::endl;
+                pos = objStart + 1;
+                continue;
+            }
+            
+            // 提取单个对象
+            std::string objStr = arrayContent.substr(objStart, objEnd - objStart + 1);
+            
+            // 解析对象的各个字段
+            Activity activity;
+            
+            // 解析id - 添加错误处理，避免stoi抛出异常
+            size_t idPos = objStr.find("\"id\":");
+            if (idPos != std::string::npos) {
+                size_t idEnd = objStr.find(',', idPos + 6);
+                if (idEnd == std::string::npos) {
+                    idEnd = objStr.find('}', idPos + 6);
+                }
+                std::string idStr = objStr.substr(idPos + 6, idEnd - idPos - 6);
+                try {
+                    activity.id = std::stoll(idStr);
+                } catch (const std::invalid_argument& e) {
+                    // ID解析失败，使用当前时间作为默认ID
+                    activity.id = static_cast<long long>(std::time(nullptr));
+                    std::cerr << "⚠️  ID解析失败，使用默认ID: " << activity.id << std::endl;
+                } catch (const std::out_of_range& e) {
+                    // ID超出范围，使用当前时间作为默认ID
+                    activity.id = static_cast<long long>(std::time(nullptr));
+                    std::cerr << "⚠️  ID超出范围，使用默认ID: " << activity.id << std::endl;
+                }
+            } else {
+                // 没有ID字段，使用当前时间作为默认ID
+                activity.id = static_cast<long long>(std::time(nullptr));
+            }
+            
+            // 解析type
+            size_t typePos = objStr.find("\"type\":");
+            if (typePos != std::string::npos) {
+                // 找到冒号位置，然后找下一个引号
+                size_t colonPos = objStr.find(":", typePos);
+                if (colonPos != std::string::npos) {
+                    size_t typeValStart = objStr.find('"', colonPos + 1) + 1;
+                    size_t typeValEnd = objStr.find('"', typeValStart);
+                    if (typeValEnd > typeValStart) {
+                        activity.type = objStr.substr(typeValStart, typeValEnd - typeValStart);
+                    }
+                }
+            }
+            
+            // 解析content
+            size_t contentPos = objStr.find("\"content\":");
+            if (contentPos != std::string::npos) {
+                // 找到冒号位置，然后找下一个引号
+                size_t colonPos = objStr.find(":", contentPos);
+                if (colonPos != std::string::npos) {
+                    size_t contentValStart = objStr.find('"', colonPos + 1) + 1;
+                    size_t contentValEnd = objStr.find('"', contentValStart);
+                    if (contentValEnd > contentValStart) {
+                        activity.content = objStr.substr(contentValStart, contentValEnd - contentValStart);
+                    }
+                }
+            }
+            
+            // 解析createdAt
+            size_t createdAtPos = objStr.find("\"createdAt\":");
+            if (createdAtPos != std::string::npos) {
+                // 找到冒号位置，然后找下一个引号
+                size_t colonPos = objStr.find(":", createdAtPos);
+                if (colonPos != std::string::npos) {
+                    size_t createdAtValStart = objStr.find('"', colonPos + 1) + 1;
+                    size_t createdAtValEnd = objStr.find('"', createdAtValStart);
+                    if (createdAtValEnd > createdAtValStart) {
+                        activity.createdAt = objStr.substr(createdAtValStart, createdAtValEnd - createdAtValStart);
+                    }
+                }
+            } else {
+                // 如果没有createdAt字段，生成当前时间
+                auto now = std::chrono::system_clock::now();
+                auto now_c = std::chrono::system_clock::to_time_t(now);
+                std::stringstream createdAtStream;
+                createdAtStream << std::put_time(std::localtime(&now_c), "%Y-%m-%dT%H:%M:%S");
+                activity.createdAt = createdAtStream.str();
+            }
+            
+            // 解析operator字段
+            size_t operatorPos = objStr.find("\"operator\":");
+            if (operatorPos != std::string::npos) {
+                // 找到冒号位置，然后找下一个引号
+                size_t colonPos = objStr.find(":", operatorPos);
+                if (colonPos != std::string::npos) {
+                    size_t operatorValStart = objStr.find('"', colonPos + 1) + 1;
+                    size_t operatorValEnd = objStr.find('"', operatorValStart);
+                    if (operatorValEnd > operatorValStart) {
+                        activity.operator_ = objStr.substr(operatorValStart, operatorValEnd - operatorValStart);
+                    }
+                }
+            } else {
+                // 如果没有operator字段，默认值为空字符串
+                activity.operator_ = "";
+            }
+            
+            // 只有有效的活动才添加到全局列表中
+            // 验证活动是否有效：
+            // 1. 所有字段不能为空
+            // 2. 不能包含无效字符（如逗号、右括号等）
+            // 3. createdAt必须是有效的时间格式（至少包含"-"和"T"）
+            if (!activity.content.empty() && !activity.type.empty() && !activity.createdAt.empty() &&
+                activity.content != "," && activity.content != "\"" && activity.content != "}" &&
+                activity.type != "," && activity.type != "\"" && activity.type != "}" &&
+                activity.createdAt.find("-") != std::string::npos && activity.createdAt.find("T") != std::string::npos) {
+                g_activities.push_back(activity);
+                std::cout << "📝 加载了一个有效活动: " << activity.content << "，操作者: " << activity.operator_ << std::endl;
+            } else {
+                std::cerr << "⚠️  跳过无效活动: content='" << activity.content << "', type='" << activity.type << "', createdAt='" << activity.createdAt << "', operator='" << activity.operator_ << "'" << std::endl;
+            }
+            
+            // 查找下一个对象
+            pos = objEnd + 2; // 跳过逗号和空格
+        }
+        
+        std::cout << "📥 已从文件加载 " << g_activities.size() << " 个活动数据" << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "❌ 加载活动数据时发生异常: " << e.what() << std::endl;
+        // 发生异常时，使用空列表
+        g_activities.clear();
+    } catch (...) {
+        std::cerr << "❌ 加载活动数据时发生未知异常" << std::endl;
+        // 发生未知异常时，使用空列表
+        g_activities.clear();
+    }
+}
+
+// 将活动数据保存到文件
+void Server::saveActivitiesToFile() {
+    try {
+        // 创建数据存储目录
+        std::filesystem::path dirPath = std::filesystem::path(ACTIVITIES_FILE).parent_path();
+        if (!std::filesystem::exists(dirPath)) {
+            std::filesystem::create_directories(dirPath);
+        }
+        
+        std::ofstream outFile(ACTIVITIES_FILE, std::ios::trunc);
+        if (!outFile.is_open()) {
+            std::cerr << "❌ 无法打开活动数据文件进行写入: " << ACTIVITIES_FILE << std::endl;
+            return;
+        }
+        
+        // 构建JSON数组
+        outFile << "[";
+        
+        for (size_t i = 0; i < g_activities.size(); i++) {
+            const Activity& a = g_activities[i];
+            
+            if (i > 0) {
+                outFile << ",";
+            }
+            
+            // 写入单个活动的JSON对象
+            outFile << "{\"id\":" << a.id << ",";
+            outFile << "\"type\":\"" << a.type << "\",";
+            outFile << "\"content\":\"" << a.content << "\",";
+            outFile << "\"createdAt\":\"" << a.createdAt << "\",";
+            outFile << "\"operator\":\"" << a.operator_ << "\"}";
+        }
+        
+        outFile << "]";
+        
+        // 检查写入是否成功
+        if (outFile.fail()) {
+            std::cerr << "❌ 写入活动数据文件失败" << std::endl;
+        } else {
+            std::cout << "💾 已将 " << g_activities.size() << " 个活动数据保存到文件: " << ACTIVITIES_FILE << std::endl;
+        }
+        
+        outFile.close();
+    } catch (const std::exception& e) {
+        std::cerr << "❌ 保存活动数据时发生异常: " << e.what() << std::endl;
+    } catch (...) {
+        std::cerr << "❌ 保存活动数据时发生未知异常" << std::endl;
+    }
+}
+
+// 从文件安全加载愿望数据
+void Server::safeLoadWishesFromFile() {
+    try {
+        // 创建数据存储目录
+        std::filesystem::path dirPath = std::filesystem::path(WISHES_FILE).parent_path();
+        if (!std::filesystem::exists(dirPath)) {
+            std::filesystem::create_directories(dirPath);
+            std::cout << "📁 已创建数据存储目录: " << dirPath << std::endl;
+        }
+        
+        // 检查文件是否存在
+        if (!std::filesystem::exists(WISHES_FILE)) {
+            std::cout << "📄 愿望数据文件不存在，使用空列表" << std::endl;
+            return;
+        }
+        
+        // 打开文件并获取大小，避免读取过大文件
+        std::ifstream inFile(WISHES_FILE, std::ios::ate);
+        if (!inFile.is_open()) {
+            std::cerr << "❌ 无法打开愿望数据文件: " << WISHES_FILE << std::endl;
+            return;
+        }
+        
+        // 获取文件大小，限制读取大小
+        std::streampos fileSize = inFile.tellg();
+        inFile.seekg(0, std::ios::beg);
+        
+        // 限制文件大小，避免内存消耗过高
+        if (fileSize > 1024 * 1024) { // 限制为1MB
+            std::cerr << "❌ 愿望数据文件过大，限制读取大小" << std::endl;
+            inFile.close();
+            return;
+        }
+        
+        // 读取文件内容
+        std::string jsonContent;
+        jsonContent.resize(static_cast<size_t>(fileSize));
+        inFile.read(&jsonContent[0], fileSize);
+        inFile.close();
+        
+        // 清空全局愿望列表
+        g_wishes.clear();
+        
+        // 解析JSON数据 - 简化版，使用更安全的解析方式
+        if (jsonContent == "[]" || jsonContent == "") {
+            std::cout << "📄 愿望数据文件为空，使用空列表" << std::endl;
+            return;
+        }
+        
+        // 简化的JSON解析
+        size_t start = jsonContent.find('[');
+        size_t end = jsonContent.rfind(']');
+        if (start == std::string::npos || end == std::string::npos || start >= end) {
+            std::cerr << "❌ 无效的愿望数据文件格式" << std::endl;
+            return;
+        }
+        
+        // 提取数组内容
+        std::string arrayContent = jsonContent.substr(start + 1, end - start - 1);
+        
+        // 分割对象
+        size_t pos = 0;
+        while (pos < arrayContent.size()) {
+            // 找到对象的开始和结束位置
+            size_t objStart = arrayContent.find('{', pos);
+            if (objStart == std::string::npos) break;
+            
+            size_t objEnd = arrayContent.find('}', objStart + 1);
+            if (objEnd == std::string::npos) break;
+            
+            // 提取单个对象
+            std::string objStr = arrayContent.substr(objStart, objEnd - objStart + 1);
+            
+            // 解析对象的各个字段
+            Wish wish;
+            
+            // 解析id - 添加错误处理
+            size_t idPos = objStr.find("\"id\":");
+            if (idPos != std::string::npos) {
+                // 找到id字段的值开始位置，跳过":"和可能的空格
+                size_t idValueStart = objStr.find(":", idPos) + 1;
+                idValueStart = objStr.find_first_not_of(" \t\r\n", idValueStart);
+                
+                if (idValueStart != std::string::npos) {
+                    // 检查值是否被引号包围
+                    if (objStr[idValueStart] == '"') {
+                        // 字符串类型的ID，找到结尾引号
+                        idValueStart++;
+                        size_t idEnd = objStr.find('"', idValueStart);
+                        if (idEnd != std::string::npos) {
+                            std::string idStr = objStr.substr(idValueStart, idEnd - idValueStart);
+                            try {
+                                wish.id = std::stoll(idStr);
+                            } catch (const std::exception& e) {
+                                // ID解析失败，使用当前时间作为默认ID
+                                wish.id = static_cast<long long>(std::time(nullptr));
+                                std::cerr << "⚠️  愿望ID解析失败，使用默认ID: " << wish.id << std::endl;
+                            }
+                        } else {
+                            // 没有找到结尾引号，使用当前时间作为默认ID
+                            wish.id = static_cast<long long>(std::time(nullptr));
+                            std::cerr << "⚠️  愿望ID解析失败，使用默认ID: " << wish.id << std::endl;
+                        }
+                    } else {
+                        // 数字类型的ID，找到值的结尾
+                        size_t idEnd = objStr.find_first_of(",}", idValueStart);
+                        std::string idStr = objStr.substr(idValueStart, idEnd - idValueStart);
+                        try {
+                            wish.id = std::stoll(idStr);
+                        } catch (const std::exception& e) {
+                            // ID解析失败，使用当前时间作为默认ID
+                            wish.id = static_cast<long long>(std::time(nullptr));
+                            std::cerr << "⚠️  愿望ID解析失败，使用默认ID: " << wish.id << std::endl;
+                        }
+                    }
+                } else {
+                    // 没有找到ID值，使用当前时间作为默认ID
+                    wish.id = static_cast<long long>(std::time(nullptr));
+                    std::cerr << "⚠️  愿望ID解析失败，使用默认ID: " << wish.id << std::endl;
+                }
+            } else {
+                // 没有ID字段，使用当前时间作为默认ID
+                wish.id = static_cast<long long>(std::time(nullptr));
+            }
+            
+            // 解析content
+            size_t contentPos = objStr.find("\"content\":");
+            if (contentPos != std::string::npos) {
+                // 找到":"的位置
+                size_t colonPos = objStr.find(":", contentPos);
+                if (colonPos != std::string::npos) {
+                    // 跳过":"和可能的空格
+                    size_t contentValStart = objStr.find('"', colonPos + 1);
+                    if (contentValStart != std::string::npos) {
+                        // 跳过开头引号
+                        contentValStart++;
+                        // 找到结尾引号，处理转义引号的情况
+                        size_t contentValEnd = contentValStart;
+                        bool inEscape = false;
+                        while (contentValEnd < objStr.size()) {
+                            if (objStr[contentValEnd] == '\\') {
+                                inEscape = !inEscape;
+                            } else if (objStr[contentValEnd] == '"' && !inEscape) {
+                                break;
+                            } else {
+                                inEscape = false;
+                            }
+                            contentValEnd++;
+                        }
+                        if (contentValEnd > contentValStart) {
+                            wish.content = objStr.substr(contentValStart, contentValEnd - contentValStart);
+                        }
+                    }
+                }
+            }
+            
+            // 解析title
+            size_t titlePos = objStr.find("\"title\":");
+            if (titlePos != std::string::npos) {
+                // 找到":"的位置
+                size_t colonPos = objStr.find(":", titlePos);
+                if (colonPos != std::string::npos) {
+                    // 跳过":"和可能的空格
+                    size_t titleValStart = objStr.find('"', colonPos + 1);
+                    if (titleValStart != std::string::npos) {
+                        // 跳过开头引号
+                        titleValStart++;
+                        // 找到结尾引号，处理转义引号的情况
+                        size_t titleValEnd = titleValStart;
+                        bool inEscape = false;
+                        while (titleValEnd < objStr.size()) {
+                            if (objStr[titleValEnd] == '\\') {
+                                inEscape = !inEscape;
+                            } else if (objStr[titleValEnd] == '"' && !inEscape) {
+                                break;
+                            } else {
+                                inEscape = false;
+                            }
+                            titleValEnd++;
+                        }
+                        if (titleValEnd > titleValStart) {
+                            wish.title = objStr.substr(titleValStart, titleValEnd - titleValStart);
+                        }
+                    }
+                }
+            } else {
+                // 如果没有title字段，使用content作为title
+                wish.title = wish.content;
+            }
+            
+            // 解析description
+            size_t descriptionPos = objStr.find("\"description\":");
+            if (descriptionPos != std::string::npos) {
+                // 找到":"的位置
+                size_t colonPos = objStr.find(":", descriptionPos);
+                if (colonPos != std::string::npos) {
+                    // 跳过":"和可能的空格
+                    size_t descValStart = objStr.find('"', colonPos + 1);
+                    if (descValStart != std::string::npos) {
+                        // 跳过开头引号
+                        descValStart++;
+                        // 找到结尾引号，处理转义引号的情况
+                        size_t descValEnd = descValStart;
+                        bool inEscape = false;
+                        while (descValEnd < objStr.size()) {
+                            if (objStr[descValEnd] == '\\') {
+                                inEscape = !inEscape;
+                            } else if (objStr[descValEnd] == '"' && !inEscape) {
+                                break;
+                            } else {
+                                inEscape = false;
+                            }
+                            descValEnd++;
+                        }
+                        if (descValEnd > descValStart) {
+                            wish.description = objStr.substr(descValStart, descValEnd - descValStart);
+                        }
+                    }
+                }
+            }
+            
+            // 解析category
+            size_t categoryPos = objStr.find("\"category\":");
+            if (categoryPos != std::string::npos) {
+                // 找到":"的位置
+                size_t colonPos = objStr.find(":", categoryPos);
+                if (colonPos != std::string::npos) {
+                    // 跳过":"和可能的空格
+                    size_t catValStart = objStr.find('"', colonPos + 1);
+                    if (catValStart != std::string::npos) {
+                        // 跳过开头引号
+                        catValStart++;
+                        // 找到结尾引号，处理转义引号的情况
+                        size_t catValEnd = catValStart;
+                        bool inEscape = false;
+                        while (catValEnd < objStr.size()) {
+                            if (objStr[catValEnd] == '\\') {
+                                inEscape = !inEscape;
+                            } else if (objStr[catValEnd] == '"' && !inEscape) {
+                                break;
+                            } else {
+                                inEscape = false;
+                            }
+                            catValEnd++;
+                        }
+                        if (catValEnd > catValStart) {
+                            wish.category = objStr.substr(catValStart, catValEnd - catValStart);
+                        }
+                    }
+                }
+            } else {
+                // 如果没有category字段，使用默认值
+                wish.category = "其他";
+            }
+            
+            // 解析isCompleted
+            size_t completedPos = objStr.find("\"isCompleted\":");
+            if (completedPos != std::string::npos) {
+                // 找到":"的位置
+                size_t colonPos = objStr.find(":", completedPos);
+                if (colonPos != std::string::npos) {
+                    // 跳过":"和可能的空格
+                    size_t completedValStart = objStr.find_first_not_of(" \t\r\n", colonPos + 1);
+                    if (completedValStart != std::string::npos) {
+                        // 找到值的结束位置（逗号或右括号）
+                        size_t completedValEnd = objStr.find(',', completedValStart);
+                        if (completedValEnd == std::string::npos) {
+                            completedValEnd = objStr.find('}', completedValStart);
+                        }
+                        std::string completedStr = objStr.substr(completedValStart, completedValEnd - completedValStart);
+                        wish.isCompleted = (completedStr == "1" || completedStr == "true");
+                    } else {
+                        wish.isCompleted = false;
+                    }
+                } else {
+                    wish.isCompleted = false;
+                }
+            } else {
+                wish.isCompleted = false;
+            }
+            
+            // 解析createdAt
+            size_t createdAtPos = objStr.find("\"createdAt\":");
+            if (createdAtPos != std::string::npos) {
+                // 找到":"的位置
+                size_t colonPos = objStr.find(":", createdAtPos);
+                if (colonPos != std::string::npos) {
+                    // 跳过":"和可能的空格
+                    size_t createdAtValStart = objStr.find('"', colonPos + 1);
+                    if (createdAtValStart != std::string::npos) {
+                        // 跳过开头引号
+                        createdAtValStart++;
+                        // 找到结尾引号，处理转义引号的情况
+                        size_t createdAtValEnd = createdAtValStart;
+                        bool inEscape = false;
+                        while (createdAtValEnd < objStr.size()) {
+                            if (objStr[createdAtValEnd] == '\\') {
+                                inEscape = !inEscape;
+                            } else if (objStr[createdAtValEnd] == '"' && !inEscape) {
+                                break;
+                            } else {
+                                inEscape = false;
+                            }
+                            createdAtValEnd++;
+                        }
+                        if (createdAtValEnd > createdAtValStart) {
+                            wish.createdAt = objStr.substr(createdAtValStart, createdAtValEnd - createdAtValStart);
+                        } else {
+                            // 如果没有createdAt字段，生成当前时间
+                            auto now = std::chrono::system_clock::now();
+                            auto now_c = std::chrono::system_clock::to_time_t(now);
+                            std::stringstream createdAtStream;
+                            createdAtStream << std::put_time(std::localtime(&now_c), "%Y-%m-%dT%H:%M:%S");
+                            wish.createdAt = createdAtStream.str();
+                        }
+                    } else {
+                        // 如果没有createdAt字段，生成当前时间
+                        auto now = std::chrono::system_clock::now();
+                        auto now_c = std::chrono::system_clock::to_time_t(now);
+                        std::stringstream createdAtStream;
+                        createdAtStream << std::put_time(std::localtime(&now_c), "%Y-%m-%dT%H:%M:%S");
+                        wish.createdAt = createdAtStream.str();
+                    }
+                } else {
+                    // 如果没有createdAt字段，生成当前时间
+                    auto now = std::chrono::system_clock::now();
+                    auto now_c = std::chrono::system_clock::to_time_t(now);
+                    std::stringstream createdAtStream;
+                    createdAtStream << std::put_time(std::localtime(&now_c), "%Y-%m-%dT%H:%M:%S");
+                    wish.createdAt = createdAtStream.str();
+                }
+            } else {
+                // 如果没有createdAt字段，生成当前时间
+                auto now = std::chrono::system_clock::now();
+                auto now_c = std::chrono::system_clock::to_time_t(now);
+                std::stringstream createdAtStream;
+                createdAtStream << std::put_time(std::localtime(&now_c), "%Y-%m-%dT%H:%M:%S");
+                wish.createdAt = createdAtStream.str();
+            }
+            
+            // 解析completedAt
+            size_t completedAtPos = objStr.find("\"completedAt\":");
+            if (completedAtPos != std::string::npos) {
+                // 找到":"的位置
+                size_t colonPos = objStr.find(":", completedAtPos);
+                if (colonPos != std::string::npos) {
+                    // 跳过":"和可能的空格
+                    size_t completedAtValStart = objStr.find('"', colonPos + 1);
+                    if (completedAtValStart != std::string::npos) {
+                        // 跳过开头引号
+                        completedAtValStart++;
+                        // 找到结尾引号，处理转义引号的情况
+                        size_t completedAtValEnd = completedAtValStart;
+                        bool inEscape = false;
+                        while (completedAtValEnd < objStr.size()) {
+                            if (objStr[completedAtValEnd] == '\\') {
+                                inEscape = !inEscape;
+                            } else if (objStr[completedAtValEnd] == '"' && !inEscape) {
+                                break;
+                            } else {
+                                inEscape = false;
+                            }
+                            completedAtValEnd++;
+                        }
+                        if (completedAtValEnd > completedAtValStart) {
+                            wish.completedAt = objStr.substr(completedAtValStart, completedAtValEnd - completedAtValStart);
+                        } else {
+                            wish.completedAt = "";
+                        }
+                    } else {
+                        wish.completedAt = "";
+                    }
+                } else {
+                    wish.completedAt = "";
+                }
+            } else {
+                wish.completedAt = "";
+            }
+            
+            // 只有有效的愿望才添加到全局列表中
+            if (!wish.content.empty() && wish.content != "," && wish.content != "\"" && wish.content != "}") {
+                g_wishes.push_back(wish);
+                std::cout << "📝 加载了一个有效愿望: " << wish.content << ", 完成状态: " << (wish.isCompleted ? "已完成" : "未完成") << std::endl;
+            } else {
+                std::cerr << "⚠️  跳过无效愿望: content='" << wish.content << "'" << std::endl;
+            }
+            
+            // 查找下一个对象
+            pos = objEnd + 2; // 跳过逗号和空格
+        }
+        
+        std::cout << "📥 已从文件加载 " << g_wishes.size() << " 个愿望数据" << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "❌ 加载愿望数据时发生异常: " << e.what() << std::endl;
+        // 发生异常时，使用空列表
+        g_wishes.clear();
+    } catch (...) {
+        std::cerr << "❌ 加载愿望数据时发生未知异常" << std::endl;
+        // 发生未知异常时，使用空列表
+        g_wishes.clear();
+    }
+}
+
+// 从文件安全加载日记数据
+void Server::safeLoadDiariesFromFile() {
+    try {
+        // 创建数据存储目录
+        std::filesystem::path dirPath = std::filesystem::path(DIARIES_FILE).parent_path();
+        if (!std::filesystem::exists(dirPath)) {
+            std::filesystem::create_directories(dirPath);
+            std::cout << "📁 已创建数据存储目录: " << dirPath << std::endl;
+        }
+        
+        // 检查文件是否存在
+        if (!std::filesystem::exists(DIARIES_FILE)) {
+            std::cout << "📄 日记数据文件不存在，使用空列表" << std::endl;
+            return;
+        }
+        
+        // 打开文件并获取大小，避免读取过大文件
+        std::ifstream inFile(DIARIES_FILE, std::ios::ate);
+        if (!inFile.is_open()) {
+            std::cerr << "❌ 无法打开日记数据文件: " << DIARIES_FILE << std::endl;
+            return;
+        }
+        
+        // 获取文件大小，限制读取大小
+        std::streampos fileSize = inFile.tellg();
+        inFile.seekg(0, std::ios::beg);
+        
+        // 限制文件大小，避免内存消耗过高
+        if (fileSize > 1024 * 1024) { // 限制为1MB
+            std::cerr << "❌ 日记数据文件过大，限制读取大小" << std::endl;
+            inFile.close();
+            return;
+        }
+        
+        // 读取文件内容
+        std::string jsonContent;
+        jsonContent.resize(static_cast<size_t>(fileSize));
+        inFile.read(&jsonContent[0], fileSize);
+        inFile.close();
+        
+        // 清空全局日记列表
+        g_diaries.clear();
+        
+        // 解析JSON数据
+        if (jsonContent == "[]" || jsonContent == "") {
+            std::cout << "📄 日记数据文件为空，使用空列表" << std::endl;
+            return;
+        }
+        
+        // 简化的JSON解析
+        size_t start = jsonContent.find('[');
+        size_t end = jsonContent.rfind(']');
+        if (start == std::string::npos || end == std::string::npos || start >= end) {
+            std::cerr << "❌ 无效的日记数据文件格式" << std::endl;
+            return;
+        }
+        
+        // 提取数组内容
+        std::string arrayContent = jsonContent.substr(start + 1, end - start - 1);
+        
+        // 分割对象
+        size_t pos = 0;
+        while (pos < arrayContent.size()) {
+            // 找到对象的开始和结束位置
+            size_t objStart = arrayContent.find('{', pos);
+            if (objStart == std::string::npos) break;
+            
+            size_t objEnd = arrayContent.find('}', objStart + 1);
+            if (objEnd == std::string::npos) break;
+            
+            // 提取单个对象
+            std::string objStr = arrayContent.substr(objStart, objEnd - objStart + 1);
+            
+            // 解析对象的各个字段
+            Diary diary;
+            
+            // 解析id
+            size_t idPos = objStr.find("\"id\":");
+            if (idPos != std::string::npos) {
+                size_t colonPos = objStr.find(":", idPos);
+                if (colonPos != std::string::npos) {
+                    size_t idValStart = objStr.find_first_of("0123456789", colonPos + 1);
+                    if (idValStart != std::string::npos) {
+                        size_t idValEnd = objStr.find_first_not_of("0123456789", idValStart);
+                        std::string idStr = objStr.substr(idValStart, idValEnd - idValStart);
+                        try {
+                            diary.id = std::stoll(idStr);
+                        } catch (...) {
+                            diary.id = static_cast<long long>(std::time(nullptr));
+                            std::cerr << "⚠️  日记ID解析失败，使用默认ID: " << diary.id << std::endl;
+                        }
+                    }
+                }
+            } else {
+                diary.id = static_cast<long long>(std::time(nullptr));
+            }
+            
+            // 解析title
+            size_t titlePos = objStr.find("\"title\":");
+            if (titlePos != std::string::npos) {
+                size_t colonPos = objStr.find(":", titlePos);
+                if (colonPos != std::string::npos) {
+                    size_t titleValStart = objStr.find('"', colonPos + 1);
+                    if (titleValStart != std::string::npos) {
+                        titleValStart++;
+                        size_t titleValEnd = objStr.find('"', titleValStart);
+                        if (titleValEnd > titleValStart) {
+                            diary.title = objStr.substr(titleValStart, titleValEnd - titleValStart);
+                        }
+                    }
+                }
+            }
+            
+            // 解析content
+            size_t contentPos = objStr.find("\"content\":");
+            if (contentPos != std::string::npos) {
+                size_t colonPos = objStr.find(":", contentPos);
+                if (colonPos != std::string::npos) {
+                    size_t contentValStart = objStr.find('"', colonPos + 1);
+                    if (contentValStart != std::string::npos) {
+                        contentValStart++;
+                        size_t contentValEnd = contentValStart;
+                        bool inEscape = false;
+                        while (contentValEnd < objStr.size()) {
+                            if (objStr[contentValEnd] == '\\') {
+                                inEscape = !inEscape;
+                            } else if (objStr[contentValEnd] == '"' && !inEscape) {
+                                break;
+                            } else {
+                                inEscape = false;
+                            }
+                            contentValEnd++;
+                        }
+                        if (contentValEnd > contentValStart) {
+                            diary.content = objStr.substr(contentValStart, contentValEnd - contentValStart);
+                        }
+                    }
+                }
+            }
+            
+            // 解析mood
+            size_t moodPos = objStr.find("\"mood\":");
+            if (moodPos != std::string::npos) {
+                size_t colonPos = objStr.find(":", moodPos);
+                if (colonPos != std::string::npos) {
+                    size_t moodValStart = objStr.find_first_of("0123456789", colonPos + 1);
+                    if (moodValStart != std::string::npos) {
+                        size_t moodValEnd = objStr.find_first_not_of("0123456789", moodValStart);
+                        std::string moodStr = objStr.substr(moodValStart, moodValEnd - moodValStart);
+                        try {
+                            diary.mood = std::stoi(moodStr);
+                        } catch (...) {
+                            diary.mood = 3; // 默认心情值
+                        }
+                    }
+                }
+            } else {
+                diary.mood = 3; // 默认心情值
+            }
+            
+            // 解析author - 改进的解析方法，处理复杂内容
+            size_t authorPos = objStr.find("\"author\":");
+            if (authorPos != std::string::npos) {
+                size_t colonPos = objStr.find(":", authorPos);
+                if (colonPos != std::string::npos) {
+                    // 跳过冒号和可能的空格
+                    size_t afterColon = colonPos + 1;
+                    while (afterColon < objStr.size() && (objStr[afterColon] == ' ' || objStr[afterColon] == '\t')) {
+                        afterColon++;
+                    }
+                    
+                    if (afterColon < objStr.size() && objStr[afterColon] == '"') {
+                        // 找到开始引号，现在查找对应的结束引号（处理转义情况）
+                        size_t authorValStart = afterColon + 1;
+                        size_t authorValEnd = authorValStart;
+                        bool inEscape = false;
+                        
+                        while (authorValEnd < objStr.size()) {
+                            if (objStr[authorValEnd] == '\\') {
+                                inEscape = !inEscape;
+                                authorValEnd++;
+                            } else if (objStr[authorValEnd] == '"' && !inEscape) {
+                                break;
+                            } else {
+                                inEscape = false;
+                                authorValEnd++;
+                            }
+                        }
+                        
+                        if (authorValEnd < objStr.size()) {
+                            diary.author = objStr.substr(authorValStart, authorValEnd - authorValStart);
+                        } else {
+                            diary.author = "未知作者";
+                        }
+                    } else {
+                        // 处理非字符串类型的author（虽然不应该发生）
+                        diary.author = "未知作者";
+                    }
+                }
+            } else {
+                diary.author = "未知作者";
+            }
+            
+            // 解析createdAt
+            size_t createdAtPos = objStr.find("\"createdAt\":");
+            if (createdAtPos != std::string::npos) {
+                size_t colonPos = objStr.find(":", createdAtPos);
+                if (colonPos != std::string::npos) {
+                    size_t createdAtValStart = objStr.find('"', colonPos + 1);
+                    if (createdAtValStart != std::string::npos) {
+                        createdAtValStart++;
+                        size_t createdAtValEnd = objStr.find('"', createdAtValStart);
+                        if (createdAtValEnd > createdAtValStart) {
+                            diary.createdAt = objStr.substr(createdAtValStart, createdAtValEnd - createdAtValStart);
+                        }
+                    }
+                }
+            } else {
+                auto now = std::chrono::system_clock::now();
+                auto now_c = std::chrono::system_clock::to_time_t(now);
+                std::stringstream createdAtStream;
+                createdAtStream << std::put_time(std::localtime(&now_c), "%Y-%m-%dT%H:%M:%S");
+                diary.createdAt = createdAtStream.str();
+            }
+            
+            // 只有有效的日记才添加到全局列表中
+            if (!diary.title.empty() || !diary.content.empty()) {
+                g_diaries.push_back(diary);
+                std::cout << "📝 加载了一篇有效日记: " << diary.title << ", 心情: " << diary.mood << std::endl;
+            } else {
+                std::cerr << "⚠️  跳过无效日记: 标题和内容都为空" << std::endl;
+            }
+            
+            // 查找下一个对象
+            pos = objEnd + 2; // 跳过逗号和空格
+        }
+        
+        std::cout << "📥 已从文件加载 " << g_diaries.size() << " 篇日记数据" << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "❌ 加载日记数据时发生异常: " << e.what() << std::endl;
+        // 发生异常时，使用空列表
+        g_diaries.clear();
+    } catch (...) {
+        std::cerr << "❌ 加载日记数据时发生未知异常" << std::endl;
+        // 发生未知异常时，使用空列表
+        g_diaries.clear();
+    }
+}
+
+// 将日记数据保存到文件
+void Server::saveDiariesToFile() {
+    try {
+        // 创建数据存储目录
+        std::filesystem::path dirPath = std::filesystem::path(DIARIES_FILE).parent_path();
+        if (!std::filesystem::exists(dirPath)) {
+            std::filesystem::create_directories(dirPath);
+        }
+        
+        std::ofstream outFile(DIARIES_FILE, std::ios::trunc);
+        if (!outFile.is_open()) {
+            std::cerr << "❌ 无法打开日记数据文件进行写入: " << DIARIES_FILE << std::endl;
+            return;
+        }
+        
+        // 构建JSON数组
+        outFile << "[";
+        
+        for (size_t i = 0; i < g_diaries.size(); i++) {
+            const Diary& diary = g_diaries[i];
+            
+            if (i > 0) {
+                outFile << ",";
+            }
+            
+            // 写入单个日记的JSON对象
+            // 转义字符串中的特殊字符
+            std::string escapedTitle = diary.title;
+            std::string escapedContent = diary.content;
+            std::string escapedAuthor = diary.author;
+            
+            // 转义双引号
+            size_t pos = 0;
+            while ((pos = escapedTitle.find('"')) != std::string::npos) {
+                escapedTitle.replace(pos, 1, "\\\"");
+                pos += 2;
+            }
+            
+            pos = 0;
+            while ((pos = escapedContent.find('"')) != std::string::npos) {
+                escapedContent.replace(pos, 1, "\\\"");
+                pos += 2;
+            }
+            
+            pos = 0;
+            while ((pos = escapedAuthor.find('"')) != std::string::npos) {
+                escapedAuthor.replace(pos, 1, "\\\"");
+                pos += 2;
+            }
+            
+            // 转义换行符
+            pos = 0;
+            while ((pos = escapedContent.find('\n')) != std::string::npos) {
+                escapedContent.replace(pos, 1, "\\n");
+                pos += 2;
+            }
+            
+            pos = 0;
+            while ((pos = escapedContent.find('\r')) != std::string::npos) {
+                escapedContent.replace(pos, 1, "\\r");
+                pos += 2;
+            }
+            
+            outFile << "{\"id\":" << diary.id << ",\"title\":\"" << escapedTitle << "\",\"content\":\"" << escapedContent << "\",\"mood\":" << diary.mood << ",\"author\":\"" << escapedAuthor << "\",\"createdAt\":\"" << diary.createdAt << "\"}";
+        }
+        
+        outFile << "]";
+        
+        // 检查写入是否成功
+        if (outFile.fail()) {
+            std::cerr << "❌ 写入日记数据文件失败" << std::endl;
+        } else {
+            std::cout << "💾 已将 " << g_diaries.size() << " 篇日记数据保存到文件: " << DIARIES_FILE << std::endl;
+        }
+        
+        outFile.close();
+    } catch (const std::exception& e) {
+        std::cerr << "❌ 保存日记数据时发生异常: " << e.what() << std::endl;
+    } catch (...) {
+        std::cerr << "❌ 保存日记数据时发生未知异常" << std::endl;
+    }
+}
+
+// 将愿望数据保存到文件
+void Server::saveWishesToFile() {
+    try {
+        // 创建数据存储目录
+        std::filesystem::path dirPath = std::filesystem::path(WISHES_FILE).parent_path();
+        if (!std::filesystem::exists(dirPath)) {
+            std::filesystem::create_directories(dirPath);
+        }
+        
+        std::ofstream outFile(WISHES_FILE, std::ios::trunc);
+        if (!outFile.is_open()) {
+            std::cerr << "❌ 无法打开愿望数据文件进行写入: " << WISHES_FILE << std::endl;
+            return;
+        }
+        
+        // 构建JSON数组
+        outFile << "[";
+        
+        for (size_t i = 0; i < g_wishes.size(); i++) {
+            const Wish& wish = g_wishes[i];
+            
+            if (i > 0) {
+                outFile << ",";
+            }
+            
+            // 写入单个愿望的JSON对象
+        outFile << "{\"id\":" << wish.id << ",";
+        outFile << "\"content\":\"" << wish.content << "\",";
+        outFile << "\"title\":\"" << wish.title << "\",";
+        outFile << "\"description\":\"" << wish.description << "\",";
+        outFile << "\"category\":\"" << wish.category << "\",";
+        outFile << "\"isCompleted\":" << (wish.isCompleted ? 1 : 0) << ",";
+        outFile << "\"createdAt\":\"" << wish.createdAt << "\",";
+        outFile << "\"completedAt\":\"" << wish.completedAt << "\"}";
+        }
+        
+        outFile << "]";
+        
+        // 检查写入是否成功
+        if (outFile.fail()) {
+            std::cerr << "❌ 写入愿望数据文件失败" << std::endl;
+        } else {
+            std::cout << "💾 已将 " << g_wishes.size() << " 个愿望数据保存到文件: " << WISHES_FILE << std::endl;
+        }
+        
+        outFile.close();
+    } catch (const std::exception& e) {
+        std::cerr << "❌ 保存愿望数据时发生异常: " << e.what() << std::endl;
+    } catch (...) {
+        std::cerr << "❌ 保存愿望数据时发生未知异常" << std::endl;
+    }
+}
+
+// 初始化纪念日数据存储目录
+void Server::initializeAnniversaryStorage() {
+    // 创建数据存储目录
+    std::filesystem::path dirPath = std::filesystem::path(ANNIVERSARIES_FILE).parent_path();
+    if (!std::filesystem::exists(dirPath)) {
+        std::filesystem::create_directories(dirPath);
+        std::cout << "📁 已创建数据存储目录: " << dirPath << std::endl;
+    }
+    
+    // 创建空的纪念日数据文件（如果不存在）
+    if (!std::filesystem::exists(ANNIVERSARIES_FILE)) {
+        std::ofstream outFile(ANNIVERSARIES_FILE);
+        if (outFile.is_open()) {
+            outFile << "[]";
+            outFile.close();
+            std::cout << "📄 已创建纪念日数据文件: " << ANNIVERSARIES_FILE << std::endl;
+        }
+    }
+}
+
+// 从文件安全加载纪念日数据（修复版）
+void Server::safeLoadAnniversariesFromFile() {
+    try {
+        // 初始化存储目录
+        initializeAnniversaryStorage();
+        
+        // 检查文件是否存在
+        if (!std::filesystem::exists(ANNIVERSARIES_FILE)) {
+            std::cout << "📄 纪念日数据文件不存在，使用空列表" << std::endl;
+            return;
+        }
+        
+        // 打开文件并获取大小，避免读取过大文件
+        std::ifstream inFile(ANNIVERSARIES_FILE, std::ios::ate);
+        if (!inFile.is_open()) {
+            std::cerr << "❌ 无法打开纪念日数据文件: " << ANNIVERSARIES_FILE << std::endl;
+            return;
+        }
+        
+        // 获取文件大小，限制读取大小
+        std::streampos fileSize = inFile.tellg();
+        inFile.seekg(0, std::ios::beg);
+        
+        // 限制文件大小，避免内存消耗过高
+        if (fileSize > 1024 * 1024) { // 限制为1MB
+            std::cerr << "❌ 纪念日数据文件过大，限制读取大小" << std::endl;
+            inFile.close();
+            return;
+        }
+        
+        // 读取文件内容
+        std::string jsonContent;
+        jsonContent.resize(static_cast<size_t>(fileSize));
+        inFile.read(&jsonContent[0], fileSize);
+        inFile.close();
+        
+        // 清空全局纪念日列表
+        g_anniversaries.clear();
+        
+        // 解析JSON数据 - 简化版，使用更安全的解析方式
+        // 只处理简单的JSON结构，避免复杂嵌套导致的问题
+        
+        // 检查是否为空数组
+        if (jsonContent == "[]" || jsonContent == "") {
+            std::cout << "📄 纪念日数据文件为空，使用空列表" << std::endl;
+            return;
+        }
+        
+        // 简化的JSON解析，只处理简单的情况
+        size_t start = jsonContent.find('[');
+        size_t end = jsonContent.rfind(']');
+        if (start == std::string::npos || end == std::string::npos || start >= end) {
+            std::cerr << "❌ 无效的纪念日数据文件格式" << std::endl;
+            return;
+        }
+        
+        // 提取数组内容
+        std::string arrayContent = jsonContent.substr(start + 1, end - start - 1);
+        
+        // 分割对象
+        size_t pos = 0;
+        while (pos < arrayContent.size()) {
+            // 找到对象的开始和结束位置
+            size_t objStart = arrayContent.find('{', pos);
+            if (objStart == std::string::npos) break;
+            
+            size_t objEnd = arrayContent.find('}', objStart + 1);
+            if (objEnd == std::string::npos) break;
+            
+            // 提取单个对象
+            std::string objStr = arrayContent.substr(objStart, objEnd - objStart + 1);
+            
+            // 解析对象的各个字段
+            Anniversary anniversary;
+            
+            // 解析id - 使用更可靠的方式
+            size_t idPos = objStr.find("\"id\":");
+            if (idPos != std::string::npos) {
+                // 找到id值的开始位置（跳过冒号和可能的空格）
+                size_t idValStart = idPos + 6; // "id": 之后的位置
+                // 跳过可能的空格
+                while (idValStart < objStr.size() && (objStr[idValStart] == ' ' || objStr[idValStart] == '\t')) {
+                    idValStart++;
+                }
+                // 找到id值的结束位置（逗号或右括号）
+                size_t idEnd = objStr.find(',', idValStart);
+                if (idEnd == std::string::npos) {
+                    idEnd = objStr.find('}', idValStart);
+                }
+                std::string idStr = objStr.substr(idValStart, idEnd - idValStart);
+                anniversary.id = std::stoll(idStr);
+            }
+            
+            // 解析title - 使用更可靠的方式
+            size_t titlePos = objStr.find("\"title\":");
+            if (titlePos != std::string::npos) {
+                // 找到title值的开始引号位置
+                size_t titleColonPos = objStr.find(':', titlePos);
+                if (titleColonPos != std::string::npos) {
+                    size_t titleValStart = objStr.find('"', titleColonPos + 1);
+                    if (titleValStart != std::string::npos) {
+                        // 找到title值的结束引号位置
+                        size_t titleValEnd = objStr.find('"', titleValStart + 1);
+                        if (titleValEnd != std::string::npos) {
+                            anniversary.title = objStr.substr(titleValStart + 1, titleValEnd - titleValStart - 1);
+                        }
+                    }
+                }
+            }
+            
+            // 解析date - 使用更可靠的方式
+            size_t datePos = objStr.find("\"date\":");
+            if (datePos != std::string::npos) {
+                // 找到date值的开始引号位置
+                size_t dateColonPos = objStr.find(':', datePos);
+                if (dateColonPos != std::string::npos) {
+                    size_t dateValStart = objStr.find('"', dateColonPos + 1);
+                    if (dateValStart != std::string::npos) {
+                        // 找到date值的结束引号位置
+                        size_t dateValEnd = objStr.find('"', dateValStart + 1);
+                        if (dateValEnd != std::string::npos) {
+                            anniversary.date = objStr.substr(dateValStart + 1, dateValEnd - dateValStart - 1);
+                        }
+                    }
+                }
+            }
+            
+            // 解析category - 使用更可靠的方式
+            size_t categoryPos = objStr.find("\"category\":");
+            if (categoryPos != std::string::npos) {
+                // 找到category值的开始引号位置
+                size_t categoryColonPos = objStr.find(':', categoryPos);
+                if (categoryColonPos != std::string::npos) {
+                    size_t categoryValStart = objStr.find('"', categoryColonPos + 1);
+                    if (categoryValStart != std::string::npos) {
+                        // 找到category值的结束引号位置
+                        size_t categoryValEnd = objStr.find('"', categoryValStart + 1);
+                        if (categoryValEnd != std::string::npos) {
+                            anniversary.category = objStr.substr(categoryValStart + 1, categoryValEnd - categoryValStart - 1);
+                        }
+                    }
+                }
+            }
+            
+            // 解析createdAt - 使用更可靠的方式
+            size_t createdAtPos = objStr.find("\"createdAt\":");
+            if (createdAtPos != std::string::npos) {
+                // 找到createdAt值的开始引号位置
+                size_t createdAtColonPos = objStr.find(':', createdAtPos);
+                if (createdAtColonPos != std::string::npos) {
+                    size_t createdAtValStart = objStr.find('"', createdAtColonPos + 1);
+                    if (createdAtValStart != std::string::npos) {
+                        // 找到createdAt值的结束引号位置
+                        size_t createdAtValEnd = objStr.find('"', createdAtValStart + 1);
+                        if (createdAtValEnd != std::string::npos) {
+                            anniversary.createdAt = objStr.substr(createdAtValStart + 1, createdAtValEnd - createdAtValStart - 1);
+                        }
+                    }
+                }
+            }
+            
+            // 添加到全局列表
+            g_anniversaries.push_back(anniversary);
+            
+            // 查找下一个对象
+            pos = objEnd + 2; // 跳过逗号和空格
+        }
+        
+        std::cout << "📥 已从文件加载 " << g_anniversaries.size() << " 个纪念日数据" << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "❌ 加载纪念日数据时发生异常: " << e.what() << std::endl;
+        // 发生异常时，使用空列表
+        g_anniversaries.clear();
+    } catch (...) {
+        std::cerr << "❌ 加载纪念日数据时发生未知异常" << std::endl;
+        // 发生未知异常时，使用空列表
+        g_anniversaries.clear();
+    }
+}
+
+// 将纪念日数据保存到文件
+void Server::saveAnniversariesToFile() {
+    std::ofstream outFile(ANNIVERSARIES_FILE, std::ios::trunc);
+    if (!outFile.is_open()) {
+        std::cerr << "❌ 无法打开纪念日数据文件进行写入: " << ANNIVERSARIES_FILE << std::endl;
+        return;
+    }
+    
+    // 构建JSON数组 - 使用正确的格式
+    outFile << "[";
+    
+    for (size_t i = 0; i < g_anniversaries.size(); i++) {
+        const Anniversary& a = g_anniversaries[i];
+        
+        if (i > 0) {
+            outFile << ",";
+        }
+        
+        // 写入单个纪念日的JSON对象
+        outFile << "{\"id\":" << a.id << ",";
+        outFile << "\"title\":\"" << a.title << "\",";
+        outFile << "\"date\":\"" << a.date << "\",";
+        outFile << "\"category\":\"" << a.category << "\",";
+        outFile << "\"createdAt\":\"" << a.createdAt << "\"}";
+    }
+    
+    outFile << "]";
+    
+    // 检查写入是否成功
+    if (outFile.fail()) {
+        std::cerr << "❌ 写入纪念日数据文件失败" << std::endl;
+    } else {
+        std::cout << "💾 已将 " << g_anniversaries.size() << " 个纪念日数据保存到文件: " << ANNIVERSARIES_FILE << std::endl;
+    }
+    
+    outFile.close();
+}
+
+// 返回照片列表
+std::string Server::handleGetPhotosRequest() {
+    // 扫描images目录，返回所有照片
+    std::string imagesDir = "/home/youxing/love_record/frontend/images";
+    std::string response = "HTTP/1.1 200 OK\r\n";
+    response += "Content-Type: application/json; charset=UTF-8\r\n";
+    response += "Access-Control-Allow-Origin: *\r\n";
+    response += "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+    response += "Access-Control-Allow-Headers: Content-Type, Authorization\r\n";
+    response += "Connection: keep-alive\r\n";
+    response += "\r\n";
+    response += "{\"success\": true,\"message\": \"获取照片列表成功\",\"data\": {\"photos\": [";
+
+    // 遍历images目录，获取所有图片文件
+    try {
+        // 存储图片文件和它们的最后修改时间
+        std::vector<std::pair<std::filesystem::path, std::filesystem::file_time_type>> imageFiles;
+        
+        // 首先收集所有图片文件
+        for (const auto& entry : std::filesystem::directory_iterator(imagesDir)) {
+            if (entry.is_regular_file()) {
+                std::string fileName = entry.path().filename().string();
+                // 只处理图片文件
+                std::string ext = fileName.substr(fileName.find_last_of(".") + 1);
+                for (char& c : ext) {
+                    c = tolower(c);
+                }
+                if (ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "gif") {
+                    // 获取文件的最后修改时间
+                    auto lastWriteTime = std::filesystem::last_write_time(entry.path());
+                    imageFiles.emplace_back(entry.path(), lastWriteTime);
+                }
+            }
+        }
+        
+        // 按最后修改时间倒序排序，最近修改的文件排在前面
+        std::sort(imageFiles.begin(), imageFiles.end(), [](const auto& a, const auto& b) {
+            return a.second > b.second;
+        });
+        
+        bool first = true;
+        for (const auto& [filePath, lastWriteTime] : imageFiles) {
+            std::string fileName = filePath.filename().string();
+            if (!first) {
+                response += ",";
+            }
+            
+            // 获取文件的最后修改时间，格式化为YYYY-MM-DD
+            std::string uploadDate = "2025-12-14";
+            try {
+                // 将file_time_type转换为time_t
+                auto tp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+                    lastWriteTime - std::filesystem::file_time_type::clock::now() + std::chrono::system_clock::now());
+                auto now_c = std::chrono::system_clock::to_time_t(tp);
+                std::tm* ptm = std::localtime(&now_c);
+                char dateStr[20];
+                std::strftime(dateStr, sizeof(dateStr), "%Y-%m-%d", ptm);
+                uploadDate = std::string(dateStr);
+            } catch (...) {
+                // 如果获取时间失败，使用当前日期作为默认值
+                auto now = std::chrono::system_clock::now();
+                auto now_c = std::chrono::system_clock::to_time_t(now);
+                std::tm* ptm = std::localtime(&now_c);
+                char dateStr[20];
+                std::strftime(dateStr, sizeof(dateStr), "%Y-%m-%d", ptm);
+                uploadDate = std::string(dateStr);
+            }
+            
+            // 使用文件大小和时间戳生成唯一ID，避免哈希冲突
+            auto fileSize = std::filesystem::file_size(filePath);
+            long long timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            long long photoId = (timestamp << 32) | (fileSize & 0xFFFFFFFF);
+            
+            response += "{\"id\": " + std::to_string(photoId) + ",";
+            response += "\"url\": \"/frontend/images/" + fileName + "\",";
+            response += "\"name\": \"" + fileName + "\",";
+            response += "\"category\": \"日常\",";
+            response += "\"uploadDate\": \"" + uploadDate + "\"}";
+            first = false;
+        }
+    } catch (const std::filesystem::filesystem_error& e) {
+        std::cerr << "❌ 无法读取images目录: " << e.what() << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "❌ 处理照片列表时发生异常: " << e.what() << std::endl;
+    }
+
+    response += "]}}";
+    return response;
+}
+
+// 返回纪念日列表
+std::string Server::handleGetAnniversariesRequest() {
+    // 构建JSON响应
+    std::string jsonStr = "{\"success\": true,\"message\": \"获取纪念日列表成功\",\"data\": {\"anniversaries\": [";
+    
+    // 添加所有纪念日
+    for (size_t i = 0; i < g_anniversaries.size(); i++) {
+        const Anniversary& a = g_anniversaries[i];
+        jsonStr += "{\"id\":" + std::to_string(a.id) + ",\"title\":\"" + a.title + "\",\"date\":\"" + a.date + "\",\"category\":\"" + a.category + "\",\"createdAt\":\"" + a.createdAt + "\"}";
+        
+        if (i < g_anniversaries.size() - 1) {
+            jsonStr += ",";
+        }
+    }
+    
+    jsonStr += "]}}";
+    
+    // 返回响应
+    std::string response = "HTTP/1.1 200 OK\r\n";
+    response += "Content-Type: application/json; charset=UTF-8\r\n";
+    response += "Access-Control-Allow-Origin: *\r\n";
+    response += "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+    response += "Access-Control-Allow-Headers: Content-Type, Authorization\r\n";
+    response += "Connection: keep-alive\r\n";
+    response += "\r\n";
+    response += jsonStr;
+    return response;
+}
+
+// 处理添加纪念日请求
+std::string Server::handlePostAnniversariesRequest(const std::string& body) {
+    // 解析请求体，获取纪念日数据
+    std::string title = ""; // 默认标题
+    std::string date = ""; // 默认日期
+    std::string category = "恋爱"; // 默认分类
+    
+    // 改进的JSON解析，处理各种格式情况
+    try {
+        // 解析标题 - 更健壮的解析方法
+        size_t titlePos = body.find("\"title\":");
+        if (titlePos != std::string::npos) {
+            // 跳过":"和可能的空格
+            size_t afterColon = body.find(":", titlePos) + 1;
+            // 跳过空格
+            size_t titleValueStart = body.find_first_not_of(" \t\r\n", afterColon);
+            
+            if (titleValueStart != std::string::npos && body[titleValueStart] == '"') {
+                // 跳过开头引号
+                titleValueStart++;
+                // 找到结尾引号，处理转义情况
+                size_t titleValueEnd = titleValueStart;
+                bool inEscape = false;
+                while (titleValueEnd < body.size()) {
+                    if (body[titleValueEnd] == '\\') {
+                        inEscape = !inEscape;
+                    } else if (body[titleValueEnd] == '"' && !inEscape) {
+                        break;
+                    } else {
+                        inEscape = false;
+                    }
+                    titleValueEnd++;
+                }
+                title = body.substr(titleValueStart, titleValueEnd - titleValueStart);
+            }
+        }
+        
+        // 解析日期 - 更健壮的解析方法
+        size_t datePos = body.find("\"date\":");
+        if (datePos != std::string::npos) {
+            // 跳过":"和可能的空格
+            size_t afterColon = body.find(":", datePos) + 1;
+            // 跳过空格
+            size_t dateValueStart = body.find_first_not_of(" \t\r\n", afterColon);
+            
+            if (dateValueStart != std::string::npos && body[dateValueStart] == '"') {
+                // 跳过开头引号
+                dateValueStart++;
+                // 找到结尾引号，处理转义情况
+                size_t dateValueEnd = dateValueStart;
+                bool inEscape = false;
+                while (dateValueEnd < body.size()) {
+                    if (body[dateValueEnd] == '\\') {
+                        inEscape = !inEscape;
+                    } else if (body[dateValueEnd] == '"' && !inEscape) {
+                        break;
+                    } else {
+                        inEscape = false;
+                    }
+                    dateValueEnd++;
+                }
+                date = body.substr(dateValueStart, dateValueEnd - dateValueStart);
+            }
+        }
+        
+        // 解析分类 - 更健壮的解析方法
+        size_t categoryPos = body.find("\"category\":");
+        if (categoryPos != std::string::npos) {
+            // 跳过":"和可能的空格
+            size_t afterColon = body.find(":", categoryPos) + 1;
+            // 跳过空格
+            size_t categoryValueStart = body.find_first_not_of(" \t\r\n", afterColon);
+            
+            if (categoryValueStart != std::string::npos && body[categoryValueStart] == '"') {
+                // 跳过开头引号
+                categoryValueStart++;
+                // 找到结尾引号，处理转义情况
+                size_t categoryValueEnd = categoryValueStart;
+                bool inEscape = false;
+                while (categoryValueEnd < body.size()) {
+                    if (body[categoryValueEnd] == '\\') {
+                        inEscape = !inEscape;
+                    } else if (body[categoryValueEnd] == '"' && !inEscape) {
+                        break;
+                    } else {
+                        inEscape = false;
+                    }
+                    categoryValueEnd++;
+                }
+                category = body.substr(categoryValueStart, categoryValueEnd - categoryValueStart);
+            }
+        }
+    } catch (...) {
+        std::cerr << "❌ 解析纪念日请求体时发生异常" << std::endl;
+    }
+    
+    // 验证解析结果，确保数据有效
+    if (title.empty()) {
+        title = "未命名纪念日";
+    }
+    if (date.empty()) {
+        date = "2025-01-01";
+    }
+    if (category.empty()) {
+        category = "恋爱";  
+    }
+    
+    // 生成当前时间作为createdAt
+    auto now = std::chrono::system_clock::now();
+    auto now_c = std::chrono::system_clock::to_time_t(now);
+    std::stringstream createdAtStream;
+    createdAtStream << std::put_time(std::localtime(&now_c), "%Y-%m-%dT%H:%M:%S");
+    std::string createdAt = createdAtStream.str();
+    
+    // 创建新的纪念日对象
+    Anniversary newAnniversary;
+    newAnniversary.id = static_cast<int>(std::time(nullptr));
+    newAnniversary.title = title;
+    newAnniversary.date = date;
+    newAnniversary.category = category;
+    newAnniversary.createdAt = createdAt;
+    
+    // 添加到全局纪念日列表
+    g_anniversaries.push_back(newAnniversary);
+    
+    // 将数据保存到文件
+    saveAnniversariesToFile();
+    
+    // 打印日志
+    std::cout << "📅 添加了新纪念日: " << newAnniversary.title << "，日期: " << newAnniversary.date << std::endl;
+    
+    // 返回成功响应
+    std::string response = "HTTP/1.1 200 OK\r\n";
+    response += "Content-Type: application/json; charset=UTF-8\r\n";
+    response += "Access-Control-Allow-Origin: *\r\n";
+    response += "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+    response += "Access-Control-Allow-Headers: Content-Type, Authorization\r\n";
+    response += "Connection: keep-alive\r\n";
+    response += "\r\n";
+    response += "{\"success\": true,\"message\": \"纪念日添加成功\",\"data\": {\"anniversaryId\": " + std::to_string(newAnniversary.id) + ",\"title\": \"" + newAnniversary.title + "\",\"date\": \"" + newAnniversary.date + "\",\"category\": \"" + newAnniversary.category + "\",\"createdAt\": \"" + newAnniversary.createdAt + "\"}}";
+    return response;
+}
+
+// 处理删除纪念日请求
+std::string Server::handleDeleteAnniversariesRequest(const std::string& body) {
+    // 解析请求体，获取纪念日ID
+    std::string idStr = "";
+    size_t idPos = body.find("\"id\":");
+    if (idPos != std::string::npos) {
+        // 找到id字段的值开始位置，跳过":"和可能的空格
+        size_t idValueStart = body.find(":", idPos) + 1;
+        idValueStart = body.find_first_not_of(" \t\r\n", idValueStart);
+        
+        if (idValueStart != std::string::npos) {
+            // 检查值是否被引号包围
+            if (body[idValueStart] == '"') {
+                // 字符串类型的ID，找到结尾引号
+                idValueStart++;
+                size_t idEnd = body.find('"', idValueStart);
+                if (idEnd != std::string::npos) {
+                    idStr = body.substr(idValueStart, idEnd - idValueStart);
+                }
+            } else {
+                // 数字类型的ID，找到值的结尾
+                size_t idEnd = body.find_first_of(",}", idValueStart);
+                if (idEnd != std::string::npos) {
+                    idStr = body.substr(idValueStart, idEnd - idValueStart);
+                } else {
+                    // ID是请求体的最后一部分
+                    idStr = body.substr(idValueStart);
+                }
+            }
+        }
+    }
+    
+    // 转换ID为长整数
+    long long anniversaryId = 0;
+    if (!idStr.empty()) {
+        anniversaryId = std::stoll(idStr);
+    }
+    
+    // 查找并删除纪念日
+    bool deleted = false;
+    for (auto it = g_anniversaries.begin(); it != g_anniversaries.end();) {
+        if (it->id == anniversaryId) {
+            // 打印日志
+            std::cout << "🗑️ 删除了纪念日: " << it->title << "，ID: " << it->id << std::endl;
+            
+            // 从列表中删除
+            it = g_anniversaries.erase(it);
+            deleted = true;
+        } else {
+            ++it;
+        }
+    }
+    
+    // 将数据保存到文件
+    saveAnniversariesToFile();
+    
+    // 返回响应
+    std::string response = "HTTP/1.1 200 OK\r\n";
+    response += "Content-Type: application/json; charset=UTF-8\r\n";
+    response += "Access-Control-Allow-Origin: *\r\n";
+    response += "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+    response += "Access-Control-Allow-Headers: Content-Type, Authorization\r\n";
+    response += "Connection: keep-alive\r\n";
+    response += "\r\n";
+    
+    if (deleted) {
+        response += "{\"success\": true,\"message\": \"纪念日删除成功\"}";
+    } else {
+        response += "{\"success\": false,\"message\": \"纪念日删除失败，未找到该纪念日\"}";
+    }
+    
+    return response;
+}
+
+// 返回日记列表
+std::string Server::handleGetDiariesRequest() {
+    // 构建JSON响应
+    std::string jsonStr = "{\"success\": true,\"message\": \"获取日记列表成功\",\"data\": {\"diaries\": [";
+    
+    // 添加所有日记
+    for (size_t i = 0; i < g_diaries.size(); i++) {
+        const Diary& diary = g_diaries[i];
+        
+        if (i > 0) {
+            jsonStr += ",";
+        }
+        
+        // 添加所有字段
+        // 先创建各个字段的转义版本
+        auto escapeJsonString = [](const std::string& str) {
+            std::string result;
+            for (char c : str) {
+                switch (c) {
+                    case '"':
+                        result += "\\\"";
+                        break;
+                    case '\\':
+                        result += "\\\\";
+                        break;
+                    case '\n':
+                        result += "\\n";
+                        break;
+                    case '\r':
+                        result += "\\r";
+                        break;
+                    case '\t':
+                        result += "\\t";
+                        break;
+                    default:
+                        result += c;
+                }
+            }
+            return result;
+        };
+        
+        std::string escapedTitle = escapeJsonString(diary.title);
+        std::string escapedContent = escapeJsonString(diary.content);
+        std::string escapedAuthor = escapeJsonString(diary.author);
+        
+        // 构建正确的JSON字符串
+        jsonStr += "{\"id\":" + std::to_string(diary.id) + ",\"title\":\"" + escapedTitle + "\",\"content\":\"" + escapedContent + "\",\"mood\":" + std::to_string(diary.mood) + ",\"author\":\"" + escapedAuthor + "\",\"createdAt\":\"" + diary.createdAt + "\"}";
+    }
+    
+    jsonStr += "]}}";
+    
+    // 返回响应
+    std::string response = "HTTP/1.1 200 OK\r\n";
+    response += "Content-Type: application/json; charset=UTF-8\r\n";
+    response += "Access-Control-Allow-Origin: *\r\n";
+    response += "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+    response += "Access-Control-Allow-Headers: Content-Type, Authorization\r\n";
+    response += "Connection: keep-alive\r\n";
+    response += "\r\n";
+    response += jsonStr;
+    return response;
+}
+
+// 处理添加日记请求
+std::string Server::handlePostDiariesRequest(const std::string& body) {
+    // 解析请求体，获取日记数据
+    std::string title = ""; // 默认标题
+    std::string content = ""; // 默认内容
+    int mood = 3; // 默认心情值
+    std::string author = "未知作者"; // 默认作者
+    
+    // 解析请求体，获取日记数据
+    try {
+        // 打印完整的请求体，用于调试
+        std::cout << "📨 收到的日记请求体: " << body << std::endl;
+        
+        // 解析title字段
+        size_t titlePos = body.find("\"title\":");
+        std::cout << "🔍 查找title字段，位置: " << titlePos << std::endl;
+        
+        if (titlePos != std::string::npos) {
+            // 找到title字段的冒号，允许字段名和冒号之间有空格
+            size_t colonPos = body.find(":", titlePos);
+            std::cout << "🔍 查找title冒号，位置: " << colonPos << std::endl;
+            
+            if (colonPos != std::string::npos) {
+                // 跳过冒号和可能的空格
+                size_t afterColon = colonPos + 1;
+                while (afterColon < body.size() && (body[afterColon] == ' ' || body[afterColon] == '\t' || body[afterColon] == '\n' || body[afterColon] == '\r')) {
+                    afterColon++;
+                }
+                std::cout << "🔍 跳过空格后，title值开始位置: " << afterColon << std::endl;
+                
+                // 找到title字段值的开始引号
+                size_t titleValStart = body.find('"', afterColon);
+                std::cout << "🔍 查找title值开始引号，位置: " << titleValStart << std::endl;
+                
+                if (titleValStart != std::string::npos) {
+                    titleValStart++;
+                    
+                    // 改进的title字段解析，处理转义字符
+                    size_t titleValEnd = titleValStart;
+                    bool inEscape = false;
+                    
+                    // 遍历整个body，直到找到匹配的结束引号
+                    while (titleValEnd < body.size()) {
+                        char currentChar = body[titleValEnd];
+                        
+                        if (currentChar == '\\') {
+                            // 处理转义字符
+                            inEscape = !inEscape;
+                            titleValEnd++;
+                        } else if (currentChar == '"' && !inEscape) {
+                            // 找到未转义的结束引号，解析完成
+                            break;
+                        } else {
+                            // 普通字符或转义状态下的引号
+                            inEscape = false;
+                            titleValEnd++;
+                        }
+                    }
+                    
+                    // 确保找到了结束引号
+                    if (titleValEnd < body.size()) {
+                        title = body.substr(titleValStart, titleValEnd - titleValStart);
+                        std::cout << "📝 解析到日记标题: " << title << std::endl;
+                    } else {
+                        std::cerr << "⚠️  未找到title字段的结束引号" << std::endl;
+                    }
+                }
+            }
+        }
+        
+        // 解析content字段
+        size_t contentPos = body.find("\"content\":");
+        std::cout << "🔍 查找content字段，位置: " << contentPos << std::endl;
+        
+        if (contentPos != std::string::npos) {
+            // 找到content字段的冒号，允许字段名和冒号之间有空格
+            size_t colonPos = body.find(":", contentPos);
+            std::cout << "🔍 查找content冒号，位置: " << colonPos << std::endl;
+            
+            if (colonPos != std::string::npos) {
+                // 跳过冒号和可能的空格
+                size_t afterColon = colonPos + 1;
+                while (afterColon < body.size() && (body[afterColon] == ' ' || body[afterColon] == '\t' || body[afterColon] == '\n' || body[afterColon] == '\r')) {
+                    afterColon++;
+                }
+                std::cout << "🔍 跳过空格后，content值开始位置: " << afterColon << std::endl;
+                
+                // 找到content字段值的开始引号
+                size_t contentValStart = body.find('"', afterColon);
+                std::cout << "🔍 查找content值开始引号，位置: " << contentValStart << std::endl;
+                
+                if (contentValStart != std::string::npos) {
+                    contentValStart++;
+                    
+                    // 改进的content字段解析，处理换行符和转义字符
+                    size_t contentValEnd = contentValStart;
+                    bool inEscape = false;
+                    
+                    // 遍历整个body，直到找到匹配的结束引号
+                    while (contentValEnd < body.size()) {
+                        char currentChar = body[contentValEnd];
+                        
+                        if (currentChar == '\\') {
+                            // 处理转义字符
+                            inEscape = !inEscape;
+                            contentValEnd++;
+                        } else if (currentChar == '"' && !inEscape) {
+                            // 找到未转义的结束引号，解析完成
+                            break;
+                        } else {
+                            // 普通字符或转义状态下的引号
+                            inEscape = false;
+                            contentValEnd++;
+                        }
+                    }
+                    
+                    // 确保找到了结束引号
+                    if (contentValEnd < body.size()) {
+                        content = body.substr(contentValStart, contentValEnd - contentValStart);
+                        std::cout << "📝 解析到日记内容: " << (content.size() > 50 ? content.substr(0, 50) + "..." : content) << std::endl;
+                    } else {
+                        std::cerr << "⚠️  未找到content字段的结束引号" << std::endl;
+                    }
+                }
+            }
+        }
+        
+        // 解析完成后，打印所有字段值
+        std::cout << "📊 解析完成后的值: " << std::endl;
+        std::cout << "   title: '" << title << "'" << std::endl;
+        std::cout << "   content: '" << (content.size() > 100 ? content.substr(0, 100) + "..." : content) << "'" << std::endl;
+        std::cout << "   mood: " << mood << std::endl;
+        std::cout << "   author: '" << author << "'" << std::endl;
+        
+        // 解析mood字段
+        size_t moodPos = body.find("\"mood\":");
+        if (moodPos != std::string::npos) {
+            size_t colonPos = body.find(":", moodPos);
+            if (colonPos != std::string::npos) {
+                size_t moodValStart = body.find_first_of("0123456789", colonPos + 1);
+                if (moodValStart != std::string::npos) {
+                    size_t moodValEnd = body.find_first_not_of("0123456789", moodValStart);
+                    std::string moodStr = body.substr(moodValStart, moodValEnd - moodValStart);
+                    try {
+                        mood = std::stoi(moodStr);
+                    } catch (...) {
+                        mood = 3; // 默认心情值
+                    }
+                }
+            }
+        }
+        
+        // 解析author字段
+        size_t authorPos = body.find("\"author\":");
+        std::cout << "🔍 查找author字段，位置: " << authorPos << std::endl;
+        
+        if (authorPos != std::string::npos) {
+            // 找到author字段的冒号，允许字段名和冒号之间有空格
+            size_t colonPos = body.find(":", authorPos);
+            std::cout << "🔍 查找author冒号，位置: " << colonPos << std::endl;
+            
+            if (colonPos != std::string::npos) {
+                // 跳过冒号和可能的空格
+                size_t afterColon = colonPos + 1;
+                while (afterColon < body.size() && (body[afterColon] == ' ' || body[afterColon] == '\t' || body[afterColon] == '\n' || body[afterColon] == '\r')) {
+                    afterColon++;
+                }
+                std::cout << "🔍 跳过空格后，author值开始位置: " << afterColon << std::endl;
+                
+                // 找到author字段值的开始引号
+                size_t authorValStart = body.find('"', afterColon);
+                std::cout << "🔍 查找author值开始引号，位置: " << authorValStart << std::endl;
+                
+                if (authorValStart != std::string::npos) {
+                    authorValStart++;
+                    
+                    // 改进的author字段解析，处理转义字符
+                    size_t authorValEnd = authorValStart;
+                    bool inEscape = false;
+                    
+                    // 遍历整个body，直到找到匹配的结束引号
+                    while (authorValEnd < body.size()) {
+                        char currentChar = body[authorValEnd];
+                        
+                        if (currentChar == '\\') {
+                            // 处理转义字符
+                            inEscape = !inEscape;
+                            authorValEnd++;
+                        } else if (currentChar == '"' && !inEscape) {
+                            // 找到未转义的结束引号，解析完成
+                            break;
+                        } else {
+                            // 普通字符或转义状态下的引号
+                            inEscape = false;
+                            authorValEnd++;
+                        }
+                    }
+                    
+                    // 确保找到了结束引号
+                    if (authorValEnd < body.size()) {
+                        author = body.substr(authorValStart, authorValEnd - authorValStart);
+                        std::cout << "📝 解析到日记作者: " << author << std::endl;
+                    } else {
+                        std::cerr << "⚠️  未找到author字段的结束引号，使用默认作者" << std::endl;
+                        author = "未知作者"; // 确保作者字段不为空
+                    }
+                }
+            }
+        }
+    } catch (...) {
+        std::cerr << "❌ 解析日记请求体时发生异常" << std::endl;
+    }
+    
+    // 生成当前时间作为createdAt
+    auto now = std::chrono::system_clock::now();
+    auto now_c = std::chrono::system_clock::to_time_t(now);
+    std::stringstream createdAtStream;
+    createdAtStream << std::put_time(std::localtime(&now_c), "%Y-%m-%dT%H:%M:%S");
+    std::string createdAt = createdAtStream.str();
+    
+    // 创建新的日记对象
+    Diary newDiary;
+    newDiary.id = static_cast<long long>(std::time(nullptr));
+    newDiary.title = title;
+    newDiary.content = content;
+    newDiary.mood = mood;
+    newDiary.author = author;
+    newDiary.createdAt = createdAt;
+    
+    // 验证日记是否有效：标题或内容至少有一个不为空
+    if (!newDiary.title.empty() || !newDiary.content.empty()) {
+        // 添加到全局日记列表
+        g_diaries.push_back(newDiary);
+    } else {
+        std::cerr << "⚠️  拒绝添加无效日记：标题和内容都为空" << std::endl;
+        // 返回错误响应
+        std::string response = "HTTP/1.1 400 Bad Request\r\n";
+        response += "Content-Type: application/json; charset=UTF-8\r\n";
+        response += "Access-Control-Allow-Origin: *\r\n";
+        response += "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+        response += "Access-Control-Allow-Headers: Content-Type, Authorization\r\n";
+        response += "Connection: keep-alive\r\n";
+        response += "\r\n";
+        response += "{\"success\": false,\"message\": \"日记标题和内容不能为空\"}";
+        return response;
+    }
+    
+    // 将数据保存到文件
+    saveDiariesToFile();
+    
+    // 打印日志
+    std::cout << "📝 添加了新日记: " << newDiary.title << ", 作者: " << newDiary.author << std::endl;
+    
+    // 返回成功响应
+    std::string response = "HTTP/1.1 200 OK\r\n";
+    response += "Content-Type: application/json; charset=UTF-8\r\n";
+    response += "Access-Control-Allow-Origin: *\r\n";
+    response += "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+    response += "Access-Control-Allow-Headers: Content-Type, Authorization\r\n";
+    response += "Connection: keep-alive\r\n";
+    response += "\r\n";
+    response += "{\"success\": true,\"message\": \"日记添加成功\",\"data\": {\"diaryId\": " + std::to_string(newDiary.id) + ",\"title\": \"" + newDiary.title + "\",\"content\": \"" + newDiary.content + "\",\"mood\": " + std::to_string(newDiary.mood) + ",\"author\": \"" + newDiary.author + "\",\"createdAt\": \"" + newDiary.createdAt + "\"}}";
+    return response;
+}
+
+// 处理删除日记请求
+std::string Server::handleDeleteDiariesRequest(const std::string& body) {
+    // 解析请求体，获取日记ID
+    std::string idStr = "";
+    size_t idPos = body.find("\"id\":");
+    if (idPos != std::string::npos) {
+        // 找到id字段的值开始位置，跳过":"和可能的空格
+        size_t idValueStart = body.find(":", idPos) + 1;
+        idValueStart = body.find_first_not_of(" \t\r\n", idValueStart);
+        
+        if (idValueStart != std::string::npos) {
+            // 检查值是否被引号包围
+            if (body[idValueStart] == '"') {
+                // 字符串类型的ID，找到结尾引号
+                idValueStart++;
+                size_t idEnd = body.find('"', idValueStart);
+                if (idEnd != std::string::npos) {
+                    idStr = body.substr(idValueStart, idEnd - idValueStart);
+                }
+            } else {
+                // 数字类型的ID，找到值的结尾
+                size_t idEnd = body.find_first_of(",}", idValueStart);
+                idStr = body.substr(idValueStart, idEnd - idValueStart);
+            }
+        }
+    }
+    
+    // 转换ID为长整数
+    long long diaryId = 0;
+    if (!idStr.empty()) {
+        try {
+            diaryId = std::stoll(idStr);
+        } catch (...) {
+            std::cerr << "❌ 日记ID解析失败: " << idStr << std::endl;
+        }
+    }
+    
+    // 查找并删除日记
+    bool deleted = false;
+    std::string diaryTitle = "未知日记";
+    for (auto it = g_diaries.begin(); it != g_diaries.end();) {
+        if (it->id == diaryId) {
+            diaryTitle = it->title;
+            
+            // 打印日志
+            std::cout << "🗑️ 删除了日记: " << it->title << "，ID: " << it->id << std::endl;
+            
+            // 从列表中删除
+            it = g_diaries.erase(it);
+            deleted = true;
+        } else {
+            ++it;
+        }
+    }
+    
+    // 将数据保存到文件
+    saveDiariesToFile();
+    
+    // 返回响应
+    std::string response = "HTTP/1.1 200 OK\r\n";
+    response += "Content-Type: application/json; charset=UTF-8\r\n";
+    response += "Access-Control-Allow-Origin: *\r\n";
+    response += "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+    response += "Access-Control-Allow-Headers: Content-Type, Authorization\r\n";
+    response += "Connection: keep-alive\r\n";
+    response += "\r\n";
+    
+    if (deleted) {
+        response += "{\"success\": true,\"message\": \"日记删除成功\"}";
+    } else {
+        response += "{\"success\": false,\"message\": \"日记删除失败，未找到该日记\"}";
+    }
+    
+    return response;
+}
+
+// 返回愿望列表
+std::string Server::handleGetWishesRequest() {
+    // 构建JSON响应
+    std::string jsonStr = "{\"success\": true,\"message\": \"获取愿望列表成功\",\"data\": {\"wishes\": [";
+    
+    // 添加所有愿望
+    for (size_t i = 0; i < g_wishes.size(); i++) {
+        const Wish& wish = g_wishes[i];
+        // 添加title字段，与content字段值相同，适配前端需求
+        jsonStr += "{\"id\":" + std::to_string(wish.id) + ",\"title\":\"" + wish.title + "\",\"content\":\"" + wish.content + "\",\"description\":\"" + wish.description + "\",\"category\":\"" + wish.category + "\",\"isCompleted\":" + (wish.isCompleted ? "1" : "0") + ",\"createdAt\":\"" + wish.createdAt + "\",\"completedAt\":\"" + wish.completedAt + "\"}";
+        
+        if (i < g_wishes.size() - 1) {
+            jsonStr += ",";
+        }
+    }
+    
+    jsonStr += "]}}";
+    
+    // 返回响应
+    std::string response = "HTTP/1.1 200 OK\r\n";
+    response += "Content-Type: application/json; charset=UTF-8\r\n";
+    response += "Access-Control-Allow-Origin: *\r\n";
+    response += "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+    response += "Access-Control-Allow-Headers: Content-Type, Authorization\r\n";
+    response += "Connection: keep-alive\r\n";
+    response += "\r\n";
+    response += jsonStr;
+    return response;
+}
+
+// 处理添加愿望请求
+std::string Server::handlePostWishesRequest(const std::string& body) {
+    // 解析请求体，获取愿望内容
+    std::string content = "";
+    std::string title = "";
+    std::string description = "";
+    std::string category = "其他";
+    
+    // 改进的JSON解析，处理各种格式情况
+    try {
+        // 解析title字段
+        size_t titlePos = body.find("\"title\":");
+        if (titlePos != std::string::npos) {
+            size_t colonPos = body.find(":", titlePos);
+            if (colonPos != std::string::npos) {
+                size_t titleStart = body.find_first_not_of(" \t\r\n", colonPos + 1);
+                if (titleStart != std::string::npos && body[titleStart] == '"') {
+                    titleStart++;
+                    size_t titleEnd = titleStart;
+                    bool inEscape = false;
+                    while (titleEnd < body.size()) {
+                        if (body[titleEnd] == '\\') {
+                            inEscape = !inEscape;
+                        } else if (body[titleEnd] == '"' && !inEscape) {
+                            break;
+                        } else {
+                            inEscape = false;
+                        }
+                        titleEnd++;
+                    }
+                    if (titleEnd != std::string::npos) {
+                        title = body.substr(titleStart, titleEnd - titleStart);
+                    }
+                }
+            }
+        }
+        
+        // 解析content字段
+        size_t contentPos = body.find("\"content\":");
+        if (contentPos != std::string::npos) {
+            size_t colonPos = body.find(":", contentPos);
+            if (colonPos != std::string::npos) {
+                size_t contentStart = body.find_first_not_of(" \t\r\n", colonPos + 1);
+                if (contentStart != std::string::npos && body[contentStart] == '"') {
+                    contentStart++;
+                    size_t contentEnd = contentStart;
+                    bool inEscape = false;
+                    while (contentEnd < body.size()) {
+                        if (body[contentEnd] == '\\') {
+                            inEscape = !inEscape;
+                        } else if (body[contentEnd] == '"' && !inEscape) {
+                            break;
+                        } else {
+                            inEscape = false;
+                        }
+                        contentEnd++;
+                    }
+                    if (contentEnd != std::string::npos) {
+                        content = body.substr(contentStart, contentEnd - contentStart);
+                    }
+                }
+            }
+        }
+        
+        // 解析description字段
+        size_t descriptionPos = body.find("\"description\":");
+        if (descriptionPos != std::string::npos) {
+            size_t colonPos = body.find(":", descriptionPos);
+            if (colonPos != std::string::npos) {
+                size_t descriptionStart = body.find_first_not_of(" \t\r\n", colonPos + 1);
+                if (descriptionStart != std::string::npos && body[descriptionStart] == '"') {
+                    descriptionStart++;
+                    size_t descriptionEnd = descriptionStart;
+                    bool inEscape = false;
+                    while (descriptionEnd < body.size()) {
+                        if (body[descriptionEnd] == '\\') {
+                            inEscape = !inEscape;
+                        } else if (body[descriptionEnd] == '"' && !inEscape) {
+                            break;
+                        } else {
+                            inEscape = false;
+                        }
+                        descriptionEnd++;
+                    }
+                    if (descriptionEnd != std::string::npos) {
+                        description = body.substr(descriptionStart, descriptionEnd - descriptionStart);
+                    }
+                }
+            }
+        }
+        
+        // 解析category字段
+        size_t categoryPos = body.find("\"category\":");
+        if (categoryPos != std::string::npos) {
+            size_t colonPos = body.find(":", categoryPos);
+            if (colonPos != std::string::npos) {
+                size_t categoryStart = body.find_first_not_of(" \t\r\n", colonPos + 1);
+                if (categoryStart != std::string::npos && body[categoryStart] == '"') {
+                    categoryStart++;
+                    size_t categoryEnd = categoryStart;
+                    bool inEscape = false;
+                    while (categoryEnd < body.size()) {
+                        if (body[categoryEnd] == '\\') {
+                            inEscape = !inEscape;
+                        } else if (body[categoryEnd] == '"' && !inEscape) {
+                            break;
+                        } else {
+                            inEscape = false;
+                        }
+                        categoryEnd++;
+                    }
+                    if (categoryEnd != std::string::npos) {
+                        category = body.substr(categoryStart, categoryEnd - categoryStart);
+                    }
+                }
+            }
+        }
+    } catch (...) {
+        std::cerr << "❌ 解析愿望请求体时发生异常" << std::endl;
+    }
+    
+    // 验证解析结果，确保内容有效
+    if (content.empty() || content == ",") {
+        if (title.empty()) {
+            title = "未命名愿望";
+        }
+        content = title;
+    }
+    
+    if (title.empty()) {
+        title = content;
+    }
+    
+    // 生成当前时间作为createdAt
+    auto now = std::chrono::system_clock::now();
+    auto now_c = std::chrono::system_clock::to_time_t(now);
+    std::stringstream createdAtStream;
+    createdAtStream << std::put_time(std::localtime(&now_c), "%Y-%m-%dT%H:%M:%S");
+    std::string createdAt = createdAtStream.str();
+    
+    // 创建新的愿望对象
+    Wish newWish;
+    newWish.id = static_cast<long long>(std::time(nullptr));
+    newWish.content = content;
+    newWish.title = title;
+    newWish.description = description;
+    newWish.category = category;
+    newWish.isCompleted = false;
+    newWish.createdAt = createdAt;
+    newWish.completedAt = "";
+    
+    // 添加到全局愿望列表
+    g_wishes.push_back(newWish);
+    
+    // 将数据保存到文件
+    saveWishesToFile();
+    
+    // 打印日志
+    std::cout << "✨ 添加了新愿望: " << newWish.content << std::endl;
+    
+    // 返回成功响应
+    std::string response = "HTTP/1.1 200 OK\r\n";
+    response += "Content-Type: application/json; charset=UTF-8\r\n";
+    response += "Access-Control-Allow-Origin: *\r\n";
+    response += "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+    response += "Access-Control-Allow-Headers: Content-Type, Authorization\r\n";
+    response += "Connection: keep-alive\r\n";
+    response += "\r\n";
+    response += "{\"success\": true,\"message\": \"愿望添加成功\",\"data\": {\"wishId\": " + std::to_string(newWish.id) + ",\"content\": \"" + newWish.content + "\",\"isCompleted\": 0,\"createdAt\": \"" + newWish.createdAt + "\"}}";
+    return response;
+}
+
+// 处理完成愿望请求
+std::string Server::handleCompleteWishRequest(const std::string& body) {
+    // 解析请求体，获取愿望ID
+    std::string idStr = "";
+    size_t idPos = body.find("\"id\":");
+    if (idPos != std::string::npos) {
+        // 找到id字段的值开始位置，跳过":"和可能的空格
+        size_t idValueStart = body.find(":", idPos) + 1;
+        idValueStart = body.find_first_not_of(" \t\r\n", idValueStart);
+        
+        // 检查值是否被引号包围
+        if (idValueStart != std::string::npos) {
+            if (body[idValueStart] == '"') {
+                // 字符串类型的ID，找到结尾引号
+                idValueStart++;
+                size_t idEnd = body.find("\"", idValueStart);
+                if (idEnd != std::string::npos) {
+                    idStr = body.substr(idValueStart, idEnd - idValueStart);
+                }
+            } else {
+                // 数字类型的ID，找到值的结尾
+                size_t idEnd = body.find_first_of(",}", idValueStart);
+                if (idEnd != std::string::npos) {
+                    idStr = body.substr(idValueStart, idEnd - idValueStart);
+                } else {
+                    idStr = body.substr(idValueStart);
+                }
+            }
+        }
+    }
+    
+    // 解析isCompleted参数
+    bool isCompleted = true; // 默认标记为完成
+    size_t completedPos = body.find("\"isCompleted\":");
+    if (completedPos != std::string::npos) {
+        // 找到isCompleted字段的值开始位置，跳过":"和可能的空格
+        size_t completedValueStart = body.find(":", completedPos) + 1;
+        completedValueStart = body.find_first_not_of(" \t\r\n", completedValueStart);
+        
+        // 检查值是否被引号包围
+        if (completedValueStart != std::string::npos) {
+            if (body[completedValueStart] == '"') {
+                // 字符串类型的值，找到结尾引号
+                completedValueStart++;
+                size_t completedEnd = body.find("\"", completedValueStart);
+                if (completedEnd != std::string::npos) {
+                    std::string completedStr = body.substr(completedValueStart, completedEnd - completedValueStart);
+                    isCompleted = (completedStr == "1" || completedStr == "true");
+                }
+            } else {
+                // 数字类型的值，找到值的结尾
+                size_t completedEnd = body.find_first_of(",}", completedValueStart);
+                std::string completedStr = body.substr(completedValueStart, completedEnd - completedValueStart);
+                isCompleted = (completedStr == "1" || completedStr == "true");
+            }
+        }
+    }
+    
+    // 转换ID为长整数
+    long long wishId = 0;
+    if (!idStr.empty()) {
+        wishId = std::stoll(idStr);
+    }
+    
+    // 查找并更新愿望
+    bool found = false;
+    std::string wishContent;
+    for (auto& wish : g_wishes) {
+        if (wish.id == wishId) {
+            // 更新完成状态
+            wish.isCompleted = isCompleted;
+            
+            if (isCompleted) {
+                // 生成当前时间作为completedAt
+                auto now = std::chrono::system_clock::now();
+                auto now_c = std::chrono::system_clock::to_time_t(now);
+                std::stringstream completedAtStream;
+                completedAtStream << std::put_time(std::localtime(&now_c), "%Y-%m-%dT%H:%M:%S");
+                wish.completedAt = completedAtStream.str();
+                
+                // 打印日志
+                std::cout << "🎉 完成了愿望: " << wish.content << "，ID: " << wish.id << std::endl;
+            } else {
+                // 清空完成时间
+                wish.completedAt = "";
+                
+                // 打印日志
+                std::cout << "🔄 取消完成愿望: " << wish.content << "，ID: " << wish.id << std::endl;
+            }
+            
+            wishContent = wish.content;
+            found = true;
+            break;
+        }
+    }
+    
+    // 将数据保存到文件
+    saveWishesToFile();
+    
+    // 返回响应
+    std::string response = "HTTP/1.1 200 OK\r\n";
+    response += "Content-Type: application/json; charset=UTF-8\r\n";
+    response += "Access-Control-Allow-Origin: *\r\n";
+    response += "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+    response += "Access-Control-Allow-Headers: Content-Type, Authorization\r\n";
+    response += "Connection: keep-alive\r\n";
+    response += "\r\n";
+    
+    if (found) {
+        // 使用std::string来构建响应，避免直接拼接const char*和const char[]
+        std::string message = isCompleted ? "愿望标记为完成成功" : "愿望取消完成成功";
+        response += "{\"success\": true,\"message\": \"" + message + "\"}";
+    } else {
+        response += "{\"success\": false,\"message\": \"未找到该愿望\"}";
+    }
+    
+    return response;
+}
+
+// 处理删除愿望请求
+std::string Server::handleDeleteWishesRequest(const std::string& body) {
+    // 解析请求体，获取愿望ID
+    std::string idStr = "";
+    size_t idPos = body.find("\"id\":");
+    if (idPos != std::string::npos) {
+        // 找到id字段的值开始位置，跳过":"和可能的空格
+        size_t idValueStart = body.find(":", idPos) + 1;
+        idValueStart = body.find_first_not_of(" \t\r\n", idValueStart);
+        
+        // 检查值是否被引号包围
+        if (idValueStart != std::string::npos) {
+            if (body[idValueStart] == '"') {
+                // 字符串类型的ID，找到结尾引号
+                idValueStart++;
+                size_t idEnd = body.find("\"", idValueStart);
+                if (idEnd != std::string::npos) {
+                    idStr = body.substr(idValueStart, idEnd - idValueStart);
+                }
+            } else {
+                // 数字类型的ID，找到值的结尾
+                size_t idEnd = body.find_first_of(",}", idValueStart);
+                if (idEnd != std::string::npos) {
+                    idStr = body.substr(idValueStart, idEnd - idValueStart);
+                } else {
+                    idStr = body.substr(idValueStart);
+                }
+            }
+        }
+    }
+    
+    // 转换ID为长整数
+    long long wishId = 0;
+    if (!idStr.empty()) {
+        wishId = std::stoll(idStr);
+    }
+    
+    // 查找并删除愿望
+    bool deleted = false;
+    std::string wishContent = "";
+    for (auto it = g_wishes.begin(); it != g_wishes.end();) {
+        if (it->id == wishId) {
+            // 保存愿望内容用于日志
+            wishContent = it->content;
+            
+            // 打印日志
+            std::cout << "🗑️ 删除了愿望: " << wishContent << "，ID: " << it->id << std::endl;
+            
+            // 从列表中删除
+            it = g_wishes.erase(it);
+            deleted = true;
+        } else {
+            ++it;
+        }
+    }
+    
+    // 将数据保存到文件
+    saveWishesToFile();
+    
+    // 返回响应
+    std::string response = "HTTP/1.1 200 OK\r\n";
+    response += "Content-Type: application/json; charset=UTF-8\r\n";
+    response += "Access-Control-Allow-Origin: *\r\n";
+    response += "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+    response += "Access-Control-Allow-Headers: Content-Type, Authorization\r\n";
+    response += "Connection: keep-alive\r\n";
+    response += "\r\n";
+    
+    if (deleted) {
+        response += "{\"success\": true,\"message\": \"愿望删除成功\"}";
+    } else {
+        response += "{\"success\": false,\"message\": \"愿望删除失败，未找到该愿望\"}";
+    }
+    
+    return response;
+}
+
+// 以下是server.h中声明但实际未使用的函数，添加空实现以避免链接错误
+
+// 设置路由
+void Server::setupRoutes() {
+    // 空实现
+}
+
+// 处理登录请求
+void Server::handleLogin(const std::string& body, std::string& response) {
+    // 空实现
+}
+
+// 处理照片上传（旧版）
+void Server::handlePhotoUpload(const std::string& body, std::string& response) {
+    // 空实现
+}
+
+// 处理照片删除（旧版）
+void Server::handlePhotoDelete(const std::string& body, std::string& response) {
+    // 空实现
+}
+
+// 处理照片列表（旧版）
+void Server::handlePhotoList(const std::string& body, std::string& response) {
+    // 空实现
+}
+
+// 处理添加纪念日（旧版）
+void Server::handleAnniversaryAdd(const std::string& body, std::string& response) {
+    // 空实现
+}
+
+// 处理纪念日列表（旧版）
+void Server::handleAnniversaryList(const std::string& body, std::string& response) {
+    // 空实现
+}
+
+// 处理添加日记（旧版）
+void Server::handleDiaryAdd(const std::string& body, std::string& response) {
+    // 空实现
+}
+
+// 处理日记列表（旧版）
+void Server::handleDiaryList(const std::string& body, std::string& response) {
+    // 空实现
+}
+
+// 处理统计数据（旧版）
+void Server::handleStats(const std::string& body, std::string& response) {
+    // 空实现
+}
+
+// 处理登录请求（新版）
+std::string Server::handleLoginRequest(const std::string& body) {
+    std::string response = "HTTP/1.1 200 OK\r\n";
+    response += "Content-Type: application/json; charset=UTF-8\r\n";
+    response += "Access-Control-Allow-Origin: *\r\n";
+    response += "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+    response += "Access-Control-Allow-Headers: Content-Type, Authorization\r\n";
+    response += "Connection: keep-alive\r\n";
+    response += "\r\n";
+    response += "{\"success\": true,\"message\": \"登录成功\"}";
+    return response;
+}
+
+// 处理恋爱天数请求
+std::string Server::handleLoveDaysRequest() {
+    std::string response = "HTTP/1.1 200 OK\r\n";
+    response += "Content-Type: application/json; charset=UTF-8\r\n";
+    response += "Access-Control-Allow-Origin: *\r\n";
+    response += "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+    response += "Access-Control-Allow-Headers: Content-Type, Authorization\r\n";
+    response += "Connection: keep-alive\r\n";
+    response += "\r\n";
+    response += "{\"success\": true,\"message\": \"获取恋爱天数成功\",\"data\": {\"days\": 100}}";
+    return response;
+}
+
+// 检查字符串是否以指定后缀结尾
+bool Server::endsWith(const std::string& str, const std::string& suffix) {
+    if (suffix.size() > str.size()) {
+        return false;
+    }
+    return str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+// 返回活动列表
+std::string Server::handleGetActivitiesRequest() {
+    // 返回活动列表（使用全局活动列表中的数据）
+    std::string response = "HTTP/1.1 200 OK\r\n";
+    response += "Content-Type: application/json; charset=UTF-8\r\n";
+    response += "Access-Control-Allow-Origin: *\r\n";
+    response += "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+    response += "Access-Control-Allow-Headers: Content-Type, Authorization\r\n";
+    response += "Connection: keep-alive\r\n";
+    response += "\r\n";
+    
+    // 构建JSON响应
+    std::string jsonStr = "{\"success\": true,\"message\": \"获取活动列表成功\",\"data\": {\"activities\": [";
+    
+    for (size_t i = 0; i < g_activities.size(); i++) {
+        const Activity& a = g_activities[i];
+        jsonStr += "{\"id\":" + std::to_string(a.id) + ",\"type\":\"" + a.type + "\",\"content\":\"" + a.content + "\",\"createdAt\":\"" + a.createdAt + "\",\"operator\":\"" + a.operator_ + "\"}";
+        
+        if (i < g_activities.size() - 1) {
+            jsonStr += ",";
+        }
+    }
+    
+    jsonStr += "]}}";
+    
+    response += jsonStr;
+    return response;
+}
+
+// 处理添加活动请求
+std::string Server::handlePostActivitiesRequest(const std::string& body) {
+    // 解析请求体，获取活动数据
+    std::string type = "other"; // 默认类型
+    std::string content = "";
+    std::string createdAt = "";
+    std::string operator_ = "";
+    long long id = std::time(nullptr);
+    
+    std::cout << "📨 收到活动请求体: " << body << std::endl;
+    
+    // 改进的JSON解析，处理各种格式情况
+    try {
+        // 简化的JSON解析，直接查找关键字段值
+        // 解析type字段
+        size_t typePos = body.find("\"type\":");
+        if (typePos != std::string::npos) {
+            // 找到":"的位置
+            size_t colonPos = body.find(":", typePos);
+            if (colonPos != std::string::npos) {
+                // 跳过":"和可能的空格
+                size_t typeStart = body.find_first_not_of(" \t\r\n", colonPos + 1);
+                if (typeStart != std::string::npos && body[typeStart] == '"') {
+                    // 跳过开头引号
+                    typeStart++;
+                    // 找到结尾引号，处理转义引号的情况
+                    size_t typeEnd = typeStart;
+                    bool inEscape = false;
+                    while (typeEnd < body.size()) {
+                        if (body[typeEnd] == '\\') {
+                            inEscape = !inEscape;
+                        } else if (body[typeEnd] == '"' && !inEscape) {
+                            break;
+                        } else {
+                            inEscape = false;
+                        }
+                        typeEnd++;
+                    }
+                    if (typeEnd != std::string::npos) {
+                        type = body.substr(typeStart, typeEnd - typeStart);
+                    }
+                }
+            }
+        }
+        
+        // 解析content字段
+        size_t contentPos = body.find("\"content\":");
+        if (contentPos != std::string::npos) {
+            // 找到":"的位置
+            size_t colonPos = body.find(":", contentPos);
+            if (colonPos != std::string::npos) {
+                // 跳过":"和可能的空格
+                size_t contentStart = body.find_first_not_of(" \t\r\n", colonPos + 1);
+                if (contentStart != std::string::npos && body[contentStart] == '"') {
+                    // 跳过开头引号
+                    contentStart++;
+                    // 找到结尾引号，处理转义引号的情况
+                    size_t contentEnd = contentStart;
+                    bool inEscape = false;
+                    while (contentEnd < body.size()) {
+                        if (body[contentEnd] == '\\') {
+                            inEscape = !inEscape;
+                        } else if (body[contentEnd] == '"' && !inEscape) {
+                            break;
+                        } else {
+                            inEscape = false;
+                        }
+                        contentEnd++;
+                    }
+                    if (contentEnd != std::string::npos) {
+                        content = body.substr(contentStart, contentEnd - contentStart);
+                    }
+                }
+            }
+        }
+        
+        // 解析createdAt字段
+        size_t createdAtPos = body.find("\"createdAt\":");
+        if (createdAtPos != std::string::npos) {
+            // 找到":"的位置
+            size_t colonPos = body.find(":", createdAtPos);
+            if (colonPos != std::string::npos) {
+                // 跳过":"和可能的空格
+                size_t createdAtStart = body.find_first_not_of(" \t\r\n", colonPos + 1);
+                if (createdAtStart != std::string::npos && body[createdAtStart] == '"') {
+                    // 跳过开头引号
+                    createdAtStart++;
+                    // 找到结尾引号，处理转义引号的情况
+                    size_t createdAtEnd = createdAtStart;
+                    bool inEscape = false;
+                    while (createdAtEnd < body.size()) {
+                        if (body[createdAtEnd] == '\\') {
+                            inEscape = !inEscape;
+                        } else if (body[createdAtEnd] == '"' && !inEscape) {
+                            break;
+                        } else {
+                            inEscape = false;
+                        }
+                        createdAtEnd++;
+                    }
+                    if (createdAtEnd != std::string::npos) {
+                        createdAt = body.substr(createdAtStart, createdAtEnd - createdAtStart);
+                    }
+                }
+            }
+        }
+        
+        // 解析operator字段
+        size_t operatorPos = body.find("\"operator\":");
+        if (operatorPos != std::string::npos) {
+            // 找到":"的位置
+            size_t colonPos = body.find(":", operatorPos);
+            if (colonPos != std::string::npos) {
+                // 跳过":"和可能的空格
+                size_t operatorStart = body.find_first_not_of(" \t\r\n", colonPos + 1);
+                if (operatorStart != std::string::npos && body[operatorStart] == '"') {
+                    // 跳过开头引号
+                    operatorStart++;
+                    // 找到结尾引号，处理转义引号的情况
+                    size_t operatorEnd = operatorStart;
+                    bool inEscape = false;
+                    while (operatorEnd < body.size()) {
+                        if (body[operatorEnd] == '\\') {
+                            inEscape = !inEscape;
+                        } else if (body[operatorEnd] == '"' && !inEscape) {
+                            break;
+                        } else {
+                            inEscape = false;
+                        }
+                        operatorEnd++;
+                    }
+                    if (operatorEnd != std::string::npos) {
+                        operator_ = body.substr(operatorStart, operatorEnd - operatorStart);
+                    }
+                }
+            }
+        }
+        
+        // 解析id字段
+        size_t idStart = body.find("\"id\":");
+        if (idStart != std::string::npos) {
+            idStart = body.find_first_of("0123456789", idStart + 6); // 找到id值的开始
+            if (idStart != std::string::npos) {
+                size_t idEnd = body.find_first_not_of("0123456789", idStart); // 找到id值的结束
+                if (idEnd != std::string::npos) {
+                    std::string idStr = body.substr(idStart, idEnd - idStart);
+                    id = std::stoll(idStr);
+                }
+            }
+        }
+    } catch (...) {
+        std::cerr << "❌ 解析活动请求体时发生异常" << std::endl;
+    }
+    
+    // 验证解析结果，确保类型和内容有效
+    if (type.empty() || type == ",") {
+        type = "other";
+    }
+    
+    // 如果没有提供创建时间，生成当前时间
+    if (createdAt.empty()) {
+        auto now = std::chrono::system_clock::now();
+        auto now_c = std::chrono::system_clock::to_time_t(now);
+        std::stringstream createdAtStream;
+        createdAtStream << std::put_time(std::localtime(&now_c), "%Y-%m-%dT%H:%M:%S");
+        createdAt = createdAtStream.str();
+    }
+    
+    // 确保内容有效
+    if (content.empty() || content == ",") {
+        // 只有在content确实为空或无效时才进行替换
+        content = "未知活动";
+    }
+    
+    // 创建新的活动对象
+    Activity newActivity;
+    newActivity.id = id; // 使用前端传递的ID或生成的唯一ID
+    newActivity.type = type;
+    newActivity.content = content;
+    newActivity.createdAt = createdAt;
+    // 如果操作者为空，默认使用"未知用户"
+    newActivity.operator_ = operator_.empty() ? "未知用户" : operator_;
+    
+    // 只有有效的活动才添加到全局列表中
+    // 验证活动是否有效：
+    // 1. 所有字段不能为空
+    // 2. 不能包含无效字符（如逗号、右括号等）
+    // 3. createdAt必须是有效的时间格式（至少包含"-"和"T"）
+    if (!newActivity.content.empty() && !newActivity.type.empty() && !newActivity.createdAt.empty() &&
+        newActivity.content != "," && newActivity.content != "\"" && newActivity.content != "}" &&
+        newActivity.type != "," && newActivity.type != "\"" && newActivity.type != "}" &&
+        newActivity.createdAt.find("-") != std::string::npos && newActivity.createdAt.find("T") != std::string::npos) {
+        // 添加到全局活动列表的开头，确保最新的活动在前面
+        g_activities.insert(g_activities.begin(), newActivity);
+        
+        // 限制活动列表数量，只保留最近的50个活动
+        if (g_activities.size() > 50) {
+            g_activities.pop_back();
+        }
+        
+        std::cout << "✅ 已添加有效活动: " << newActivity.content << "，类型: " << newActivity.type << "，操作者: " << newActivity.operator_ << std::endl;
+    } else {
+        std::cerr << "❌ 拒绝添加无效活动: content='" << newActivity.content << "', type='" << newActivity.type << "', createdAt='" << newActivity.createdAt << "', operator='" << newActivity.operator_ << "'" << std::endl;
+    }
+    
+    // 将数据保存到文件
+    saveActivitiesToFile();
+    
+    // 打印日志
+    std::cout << "📝 添加了新活动: " << newActivity.content << "，类型: " << newActivity.type << "，操作者: " << newActivity.operator_ << "，ID: " << newActivity.id << std::endl;
+    
+    // 返回成功响应
+    std::string response = "HTTP/1.1 200 OK\r\n";
+    response += "Content-Type: application/json; charset=UTF-8\r\n";
+    response += "Access-Control-Allow-Origin: *\r\n";
+    response += "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+    response += "Access-Control-Allow-Headers: Content-Type, Authorization\r\n";
+    response += "Connection: keep-alive\r\n";
+    response += "\r\n";
+    response += "{\"success\": true,\"message\": \"活动添加成功\",\"data\": {\"activityId\": " + std::to_string(newActivity.id) + ",\"type\": \"" + newActivity.type + "\",\"content\": \"" + newActivity.content + "\",\"createdAt\": \"" + newActivity.createdAt + "\",\"operator\": \"" + newActivity.operator_ + "\"}}";
+    return response;
+}
+
+// 返回统计数据
+std::string Server::handleGetStatsRequest() {
+    // 获取真实统计数据
+    int totalPhotosCount = 0;
+    int dailyPhotoCount = 0; // 日常照数量
+    int diariesCount = 0;
+    int anniversariesCount = 0;
+    int wishesCount = 0;
+    int activitiesCount = 0;
+    
+    // 统计照片数量和分类
+    std::string photosDir = "/home/youxing/love_record/frontend/images";
+    if (std::filesystem::exists(photosDir) && std::filesystem::is_directory(photosDir)) {
+        for (const auto& entry : std::filesystem::directory_iterator(photosDir)) {
+            if (entry.is_regular_file()) {
+                std::string ext = entry.path().extension().string();
+                for (char& c : ext) {
+                    c = tolower(c);
+                }
+                if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif") {
+                    totalPhotosCount++;
+                    dailyPhotoCount++; // 所有照片都作为日常照统计
+                }
+            }
+        }
+    }
+    
+    // 直接使用全局变量获取日记数量
+    diariesCount = g_diaries.size();
+    
+    // 计算平均心情指数
+    double averageMood = 0.0;
+    if (g_diaries.size() > 0) {
+        int totalMood = 0;
+        for (const auto& diary : g_diaries) {
+            totalMood += diary.mood;
+        }
+        averageMood = static_cast<double>(totalMood) / g_diaries.size();
+    }
+    
+    // 直接使用全局变量获取纪念日数量
+    anniversariesCount = g_anniversaries.size();
+    
+    // 直接使用全局变量获取活动数量
+    activitiesCount = g_activities.size();
+    
+    // 直接使用全局变量获取愿望数量
+    wishesCount = g_wishes.size();
+    std::cout << "📊 当前g_wishes大小: " << g_wishes.size() << std::endl;
+    
+    std::string response = "HTTP/1.1 200 OK\r\n";
+    response += "Content-Type: application/json; charset=UTF-8\r\n";
+    response += "Access-Control-Allow-Origin: *\r\n";
+    response += "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+    response += "Access-Control-Allow-Headers: Content-Type, Authorization\r\n";
+    response += "Connection: keep-alive\r\n";
+    response += "\r\n";
+    
+    response += "{\"success\": true,\"message\": \"获取统计数据成功\",\"data\": {";
+    response += "\"photosCount\": " + std::to_string(totalPhotosCount) + ",";
+    response += "\"dailyPhotoCount\": " + std::to_string(dailyPhotoCount) + ",";
+    response += "\"diariesCount\": " + std::to_string(diariesCount) + ",";
+    response += "\"anniversariesCount\": " + std::to_string(anniversariesCount) + ",";
+    response += "\"wishesCount\": " + std::to_string(wishesCount) + ",";
+    response += "\"activitiesCount\": " + std::to_string(activitiesCount) + ",";
+    response += "\"averageMood\": " + std::to_string(averageMood);
+    response += "}}";
+    
+    return response;
+}
+
+// 提供静态文件服务
+std::string Server::serveStaticFile(const std::string& filePath) {
+    std::cout << "📂 尝试打开静态文件: " << filePath << std::endl;
+
+    // 检查文件是否存在
+    std::filesystem::path path(filePath);
+    
+    // 如果是目录，返回404
+    if (std::filesystem::is_directory(path)) {
+        std::cerr << "❌ 无法打开目录作为文件: " << filePath << std::endl;
+        std::string response = "HTTP/1.1 404 Not Found\r\n";
+        response += "Content-Type: text/html; charset=UTF-8\r\n";
+        response += "Access-Control-Allow-Origin: *\r\n";
+        response += "Connection: close\r\n";
+        response += "\r\n";
+        response += "<!DOCTYPE html><html><body><h1>404 Not Found</h1><p>目录无法直接访问</p></body></html>";
+        return response;
+    }
+    
+    // 检查文件是否存在且是普通文件
+    if (!std::filesystem::exists(path) || !std::filesystem::is_regular_file(path)) {
+        std::cerr << "❌ 无法打开文件: " << filePath << std::endl;
+        std::string response = "HTTP/1.1 404 Not Found\r\n";
+        response += "Content-Type: text/html; charset=UTF-8\r\n";
+        response += "Access-Control-Allow-Origin: *\r\n";
+        response += "Connection: close\r\n";
+        response += "\r\n";
+        response += "<!DOCTYPE html><html><body><h1>404 Not Found</h1><p>文件不存在</p></body></html>";
+        return response;
+    }
+
+    // 打开文件
+    std::ifstream file(filePath, std::ios::binary | std::ios::ate);
+    if (!file.is_open()) {
+        std::cerr << "❌ 无法打开文件: " << filePath << std::endl;
+        std::string response = "HTTP/1.1 404 Not Found\r\n";
+        response += "Content-Type: text/html; charset=UTF-8\r\n";
+        response += "Access-Control-Allow-Origin: *\r\n";
+        response += "Connection: close\r\n";
+        response += "\r\n";
+        response += "<!DOCTYPE html><html><body><h1>404 Not Found</h1><p>文件无法访问</p></body></html>";
+        return response;
+    }
+
+    try {
+        // 获取文件大小
+        std::streamsize size = file.tellg();
+        file.seekg(0, std::ios::beg);
+
+        // 读取文件内容
+        std::vector<char> buffer(size);
+        if (!file.read(buffer.data(), size)) {
+            std::cerr << "❌ 无法读取文件: " << filePath << std::endl;
+            std::string response = "HTTP/1.1 500 Internal Server Error\r\n";
+            response += "Content-Type: text/html; charset=UTF-8\r\n";
+            response += "Access-Control-Allow-Origin: *\r\n";
+            response += "Connection: close\r\n";
+            response += "\r\n";
+            response += "<!DOCTYPE html><html><body><h1>500 Internal Server Error</h1><p>读取文件失败</p></body></html>";
+            return response;
+        }
+
+        // 构建响应
+        std::string response = "HTTP/1.1 200 OK\r\n";
+        response += "Content-Type: " + getMimeType(filePath) + "\r\n";
+        response += "Access-Control-Allow-Origin: *\r\n";
+        response += "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+        response += "Access-Control-Allow-Headers: Content-Type, Authorization\r\n";
+        response += "Content-Length: " + std::to_string(size) + "\r\n";
+        response += "Connection: close\r\n";
+        response += "\r\n";
+
+        // 追加文件内容
+        response.append(buffer.data(), buffer.size());
+        std::cout << "✅ 成功返回静态文件: " << filePath << "，大小: " << size << "字节" << std::endl;
+        return response;
+    } catch (const std::bad_alloc& e) {
+        std::cerr << "❌ 内存分配失败: " << e.what() << std::endl;
+        std::string response = "HTTP/1.1 500 Internal Server Error\r\n";
+        response += "Content-Type: text/html; charset=UTF-8\r\n";
+        response += "Access-Control-Allow-Origin: *\r\n";
+        response += "Connection: close\r\n";
+        response += "\r\n";
+        response += "<!DOCTYPE html><html><body><h1>500 Internal Server Error</h1><p>内存分配失败</p></body></html>";
+        return response;
+    } catch (const std::exception& e) {
+        std::cerr << "❌ 处理文件时发生异常: " << e.what() << std::endl;
+        std::string response = "HTTP/1.1 500 Internal Server Error\r\n";
+        response += "Content-Type: text/html; charset=UTF-8\r\n";
+        response += "Access-Control-Allow-Origin: *\r\n";
+        response += "Connection: close\r\n";
+        response += "\r\n";
+        response += "<!DOCTYPE html><html><body><h1>500 Internal Server Error</h1><p>处理文件时发生异常</p></body></html>";
+        return response;
+    }
+}
+
+// 获取文件的MIME类型
+std::string Server::getMimeType(const std::string& filePath) {
+    std::string ext = filePath.substr(filePath.find_last_of(".") + 1);
+    for (char& c : ext) {
+        c = tolower(c);
+    }
+
+    if (ext == "html") return "text/html; charset=UTF-8";
+    if (ext == "css") return "text/css; charset=UTF-8";
+    if (ext == "js") return "application/javascript; charset=UTF-8";
+    if (ext == "json") return "application/json; charset=UTF-8";
+    if (ext == "jpg" || ext == "jpeg") return "image/jpeg";
+    if (ext == "png") return "image/png";
+    if (ext == "gif") return "image/gif";
+    if (ext == "svg") return "image/svg+xml";
+    if (ext == "ico") return "image/x-icon";
+    if (ext == "txt") return "text/plain; charset=UTF-8";
+    return "application/octet-stream";
+}
+
+// 解析HTTP请求
+std::map<std::string, std::string> Server::parseHttpRequest(const std::string& request) {
+    std::map<std::string, std::string> parsedRequest;
+    std::istringstream requestStream(request);
+    std::string line;
+
+    // 解析请求行
+    if (std::getline(requestStream, line)) {
+        std::istringstream lineStream(line);
+        std::string method, path, version;
+        lineStream >> method >> path >> version;
+        parsedRequest["method"] = method;
+        parsedRequest["path"] = path;
+        parsedRequest["version"] = version;
+    }
+
+    // 解析请求头
+    while (std::getline(requestStream, line) && line != "\r") {
+        if (line.empty()) break;
+        size_t colonPos = line.find(":");
+        if (colonPos != std::string::npos) {
+            std::string key = line.substr(0, colonPos);
+            std::string value = line.substr(colonPos + 2, line.size() - colonPos - 3); // 去掉冒号、空格和\r
+            parsedRequest[key] = value;
+        }
+    }
+
+    // 解析请求体
+    std::string body;
+    while (std::getline(requestStream, line)) {
+        body += line + "\n";
+    }
+    if (!body.empty()) {
+        parsedRequest["body"] = body.substr(0, body.size() - 1); // 去掉最后一个\n
+        // 检查是否是multipart/form-data请求
+        std::string contentType = parsedRequest["Content-Type"];
+        if (contentType.find("multipart/form-data") != std::string::npos) {
+            parsedRequest["isMultipart"] = "true";
+        }
+    }
+
+    return parsedRequest;
+}
+
+// 运行简单的HTTP服务器
+void Server::runSimpleServer() {
+    int server_fd, new_socket;
+    struct sockaddr_in address;
+    int opt = 1;
+    int addrlen = sizeof(address);
+    char buffer[30000] = {0};
+
+    // 初始化随机数种子
+    srand(std::time(nullptr));
+
+    // 创建socket文件描述符
+    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
+        std::cerr << "❌ socket创建失败" << std::endl;
+        return;
+    }
+
+    // 设置socket选项
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) {
+        std::cerr << "❌ setsockopt失败" << std::endl;
+        return;
+    }
+
+    // 设置地址
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(pImpl->port);
+
+    // 绑定socket
+    if (bind(server_fd, (struct sockaddr*)&address, sizeof(address)) < 0) {
+        std::cerr << "❌ 绑定失败" << std::endl;
+        return;
+    }
+
+    // 监听连接
+    if (listen(server_fd, 3) < 0) {
+        std::cerr << "❌ 监听失败" << std::endl;
+        return;
+    }
+
+    while (pImpl->running) {
+        // 接受连接
+        if ((new_socket = accept(server_fd, (struct sockaddr*)&address, (socklen_t*)&addrlen)) < 0) {
+            if (pImpl->running) {
+                std::cerr << "❌ 接受连接失败" << std::endl;
+            }
+            continue;
+        }
+
+        // 读取请求头
+        char headerBuffer[2048] = {0};
+        ssize_t headerBytesRead = read(new_socket, headerBuffer, 2048);
+        if (headerBytesRead < 0) {
+            std::cerr << "❌ 读取请求头失败" << std::endl;
+            close(new_socket);
+            continue;
+        }
+
+        std::string requestHeader(headerBuffer, headerBytesRead);
+        
+        // 检查是否是文件上传请求
+        bool isFileUpload = (requestHeader.find("POST /api/photos/upload") != std::string::npos);
+        
+        std::string response;
+        
+        if (isFileUpload) {
+            // 从URL查询参数中获取文件名
+            std::string filename = "";
+            size_t filenamePos = requestHeader.find("filename=");
+            if (filenamePos != std::string::npos) {
+                size_t endPos = requestHeader.find(" ", filenamePos);
+                if (endPos == std::string::npos) {
+                    endPos = requestHeader.find("\r", filenamePos);
+                }
+                if (endPos != std::string::npos) {
+                    filename = requestHeader.substr(filenamePos + 9, endPos - filenamePos - 9);
+                }
+            }
+            
+            // 生成唯一文件名，保留原始文件扩展名
+            // 使用纳秒级别的时间戳，确保文件名唯一
+            auto now = std::chrono::high_resolution_clock::now();
+            auto now_ns = std::chrono::time_point_cast<std::chrono::nanoseconds>(now);
+            auto timestamp_ns = now_ns.time_since_epoch().count();
+            std::string uniqueFilename = std::to_string(timestamp_ns);
+            if (!filename.empty()) {
+                // 提取文件扩展名
+                size_t dotPos = filename.find_last_of(".");
+                if (dotPos != std::string::npos) {
+                    uniqueFilename += filename.substr(dotPos);
+                } else {
+                    uniqueFilename += ".jpg"; // 默认使用jpg扩展名
+                }
+            } else {
+                uniqueFilename += ".jpg"; // 默认使用jpg扩展名
+            }
+            
+            // 生成完整的文件路径
+            std::string imagesDir = "/home/youxing/love_record/frontend/images";
+            std::string filePath = imagesDir + "/" + uniqueFilename;
+            
+            // 创建文件
+            std::ofstream outFile(filePath, std::ios::binary);
+            if (outFile.is_open()) {
+                // 找到请求体的开始位置（两个连续的\r\n之后）
+                size_t bodyStartPos = requestHeader.find("\r\n\r\n");
+                if (bodyStartPos != std::string::npos) {
+                    // 写入请求头中包含的请求体部分
+                    outFile.write(headerBuffer + bodyStartPos + 4, headerBytesRead - bodyStartPos - 4);
+                }
+                
+                // 读取所有剩余的请求体并写入文件，确保完整保存图片内容
+                char bodyBuffer[8192] = {0};
+                ssize_t bodyBytesRead;
+                
+                // 使用阻塞模式读取数据，确保完整读取文件内容
+                // 设置超时时间为30秒
+                struct timeval timeout;
+                timeout.tv_sec = 30;
+                timeout.tv_usec = 0;
+                setsockopt(new_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+                
+                // 循环读取所有数据，直到没有数据可读或超时
+                while ((bodyBytesRead = read(new_socket, bodyBuffer, sizeof(bodyBuffer))) > 0) {
+                    // 写入文件
+                    outFile.write(bodyBuffer, bodyBytesRead);
+                }
+                
+                // 检查是否是正常读取结束（bodyBytesRead == 0）或超时/错误
+                if (bodyBytesRead < 0) {
+                    // 检查是否是超时错误
+                    if (errno == EWOULDBLOCK || errno == EAGAIN) {
+                        std::cerr << "⚠️  读取文件内容超时，但已保存部分内容" << std::endl;
+                    } else {
+                        std::cerr << "❌ 读取文件内容失败: " << strerror(errno) << std::endl;
+                    }
+                }
+                
+                outFile.close();
+                
+                // 验证文件大小
+                size_t fileSize = std::filesystem::file_size(filePath);
+                
+                // 生成成功响应
+                std::string photoUrl = "/frontend/images/" + std::filesystem::path(filePath).filename().string();
+                response = "HTTP/1.1 200 OK\r\n";
+                response += "Content-Type: application/json; charset=UTF-8\r\n";
+                response += "Access-Control-Allow-Origin: *\r\n";
+                response += "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+                response += "Access-Control-Allow-Headers: Content-Type, Authorization\r\n";
+                response += "Connection: keep-alive\r\n";
+                response += "\r\n";
+                response += "{\"success\": true,\"message\": \"照片上传成功\",\"data\": {\"photoId\": " + std::to_string(std::time(nullptr)) + ",\"url\": \"" + photoUrl + "\"}}";
+                std::cout << "📸 照片上传成功，保存路径: " << filePath << "，URL: " << photoUrl << "，文件大小: " << fileSize << "字节" << std::endl;
+            } else {
+                response = "HTTP/1.1 500 Internal Server Error\r\n";
+                response += "Content-Type: application/json; charset=UTF-8\r\n";
+                response += "Access-Control-Allow-Origin: *\r\n";
+                response += "Connection: close\r\n";
+                response += "\r\n";
+                response += "{\"success\": false,\"message\": \"无法创建文件\"}";
+                std::cerr << "❌ 无法创建文件: " << filePath << std::endl;
+            }
+        } else {
+            // 不是文件上传请求，使用正常的解析流程
+            std::string fullRequest(headerBuffer, headerBytesRead);
+            
+            // 检查是否是POST请求，如果是则读取完整的请求体
+            std::string requestMethod = fullRequest.substr(0, fullRequest.find(" "));
+            if (requestMethod == "POST") {
+                // 解析Content-Length头，获取请求体大小
+                size_t contentLengthPos = fullRequest.find("Content-Length:");
+                if (contentLengthPos != std::string::npos) {
+                    size_t contentLengthEnd = fullRequest.find("\r\n", contentLengthPos);
+                    std::string contentLengthStr = fullRequest.substr(contentLengthPos + 15, contentLengthEnd - contentLengthPos - 15);
+                    try {
+                        int contentLength = std::stoi(contentLengthStr);
+                        
+                        // 计算已经读取的请求体大小
+                        size_t bodyStartPos = fullRequest.find("\r\n\r\n");
+                        int readBodySize = 0;
+                        if (bodyStartPos != std::string::npos) {
+                            readBodySize = headerBytesRead - bodyStartPos - 4;
+                        }
+                        
+                        // 如果还有剩余的请求体需要读取
+                        if (readBodySize < contentLength) {
+                            // 读取剩余的请求体
+                            int remainingBytes = contentLength - readBodySize;
+                            char bodyBuffer[8192] = {0};
+                            ssize_t bytesRead;
+                            
+                            // 设置超时时间为30秒
+                            struct timeval timeout;
+                            timeout.tv_sec = 30;
+                            timeout.tv_usec = 0;
+                            setsockopt(new_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+                            
+                            while (remainingBytes > 0 && (bytesRead = read(new_socket, bodyBuffer, sizeof(bodyBuffer))) > 0) {
+                                fullRequest.append(bodyBuffer, bytesRead);
+                                remainingBytes -= bytesRead;
+                            }
+                        }
+                    } catch (...) {
+                        std::cerr << "❌ 解析Content-Length失败" << std::endl;
+                    }
+                }
+            }
+            
+            auto parsedRequest = parseHttpRequest(fullRequest);
+            
+            if (parsedRequest["method"] == "GET") {
+                response = handleGetRequest(parsedRequest["path"]);
+            } else if (parsedRequest["method"] == "POST") {
+                response = handlePostRequest(parsedRequest["path"], parsedRequest["body"]);
+            } else if (parsedRequest["method"] == "OPTIONS") {
+                response = handleOptionsRequest(parsedRequest["path"]);
+            } else {
+                response = "HTTP/1.1 405 Method Not Allowed\r\n";
+                response += "Allow: GET, POST, OPTIONS\r\n";
+                response += "Access-Control-Allow-Origin: *\r\n";
+                response += "Connection: close\r\n";
+                response += "\r\n";
+            }
+        }
+
+        // 发送响应
+        ssize_t bytesSent = send(new_socket, response.c_str(), response.size(), 0);
+        if (bytesSent < 0) {
+            std::cerr << "❌ 发送响应失败" << std::endl;
+        } else {
+            std::cout << "✅ 发送响应成功，字节数: " << bytesSent << std::endl;
+        }
+
+        // 关闭连接
+        close(new_socket);
+    }
+
+    // 关闭服务器socket
+    close(server_fd);
+}
+
+// 获取当前时间
+std::string Server::getCurrentTime() {
+    auto now = std::chrono::system_clock::now();
+    auto time_t = std::chrono::system_clock::to_time_t(now);
+    std::tm* tm = std::localtime(&time_t);
+    char buffer[20];
+    std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", tm);
+    return std::string(buffer);
+}
