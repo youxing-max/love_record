@@ -165,8 +165,23 @@ def main():
     print("\n💕 感谢使用恋爱时光记录系统！祝您幸福！💕\n")
 
 
+def ensure_directories():
+    """确保必要的照片存储目录存在"""
+    script_dir = os.path.dirname(__file__)
+    images_dir = os.path.join(script_dir, 'frontend', 'images')
+
+    if not os.path.exists(images_dir):
+        os.makedirs(images_dir, exist_ok=True)
+        print(f"  ✓ 已创建目录: {images_dir}")
+    else:
+        print(f"  ✓ 目录已存在: {images_dir}")
+
+
 def apply_config(config):
     """应用配置到系统文件"""
+    # 确保 frontend/images 目录存在
+    ensure_directories()
+
     # 1. 修改 frontend/index.html
     html_path = os.path.join(os.path.dirname(__file__), 'frontend', 'index.html')
     if os.path.exists(html_path):
