@@ -4,9 +4,9 @@ project(LoveRecord)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# 查找必要的库
-find_package(PkgConfig REQUIRED)
-find_package(SQLite3 REQUIRED)
+# 查找必要的库 --暂时用不到
+# find_package(PkgConfig REQUIRED)
+# find_package(SQLite3 REQUIRED)
 
 # 包含目录
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
