@@ -548,6 +548,16 @@ bool Server::initialize(int port, const std::string& dbPath) {
 
 ---
 
+## Star History
+
+<a href="https://www.star-history.com/?repos=youxing-max%2Flove_record&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=youxing-max/love_record&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=youxing-max/love_record&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=youxing-max/love_record&type=date&legend=top-left" />
+ </picture>
+</a>
+---
 <div align="center">
 
 **💕 LOVE_TIME_RECORD - 记录我们的美好时光 💕**
