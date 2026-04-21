@@ -31,3 +31,10 @@ desktop.ini
 # 用户上传的照片和数据（可选，根据需要调整）
 # backend/data/*.json
 # frontend/images/uploads/
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
